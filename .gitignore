@@ -9,3 +9,15 @@
 *.swp
 *.swo
 *~
+
+# Local tools, credentials, databases and generated contracts
+.build/
+.env
+.env.*
+!.env.example
+web/node_modules/
+web/.react-router/
+web/build/
+web/app/.generated/
+web/test-results/
+web/playwright-report/

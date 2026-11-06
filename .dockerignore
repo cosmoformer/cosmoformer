@@ -1,0 +1,9 @@
+.git
+.build
+.env*
+web/node_modules
+web/build
+web/.react-router
+web/app/.generated
+*.tfstate*
+*.tfplan

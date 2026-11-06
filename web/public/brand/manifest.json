@@ -1,0 +1,139 @@
+{
+  "name": "Cosmoformer Spiral Ribbon",
+  "colors": {
+    "forest": "#123c32",
+    "emerald": "#167760",
+    "mint": "#a1caba",
+    "white": "#ffffff"
+  },
+  "files": [
+    {
+      "file": "logo-horizontal-color.svg",
+      "bytes": 7701
+    },
+    {
+      "file": "logo-stacked-color.svg",
+      "bytes": 7723
+    },
+    {
+      "file": "mark-color.svg",
+      "bytes": 1653
+    },
+    {
+      "file": "wordmark-color.svg",
+      "bytes": 6259
+    },
+    {
+      "file": "logo-horizontal-reversed.svg",
+      "bytes": 7701
+    },
+    {
+      "file": "logo-stacked-reversed.svg",
+      "bytes": 7723
+    },
+    {
+      "file": "mark-reversed.svg",
+      "bytes": 1653
+    },
+    {
+      "file": "wordmark-reversed.svg",
+      "bytes": 6259
+    },
+    {
+      "file": "logo-horizontal-mono-dark.svg",
+      "bytes": 7701
+    },
+    {
+      "file": "logo-stacked-mono-dark.svg",
+      "bytes": 7723
+    },
+    {
+      "file": "mark-mono-dark.svg",
+      "bytes": 1653
+    },
+    {
+      "file": "wordmark-mono-dark.svg",
+      "bytes": 6259
+    },
+    {
+      "file": "logo-horizontal-mono-white.svg",
+      "bytes": 7701
+    },
+    {
+      "file": "logo-stacked-mono-white.svg",
+      "bytes": 7723
+    },
+    {
+      "file": "mark-mono-white.svg",
+      "bytes": 1653
+    },
+    {
+      "file": "wordmark-mono-white.svg",
+      "bytes": 6259
+    },
+    {
+      "file": "logo-horizontal-color.png",
+      "bytes": 44981
+    },
+    {
+      "file": "logo-stacked-color.png",
+      "bytes": 40758
+    },
+    {
+      "file": "mark-color.png",
+      "bytes": 20306
+    },
+    {
+      "file": "wordmark-color.png",
+      "bytes": 30424
+    },
+    {
+      "file": "logo-horizontal-reversed.png",
+      "bytes": 36506
+    },
+    {
+      "file": "logo-stacked-reversed.png",
+      "bytes": 33782
+    },
+    {
+      "file": "mark-reversed.png",
+      "bytes": 18059
+    },
+    {
+      "file": "wordmark-reversed.png",
+      "bytes": 22834
+    },
+    {
+      "file": "favicon.svg",
+      "bytes": 1701
+    },
+    {
+      "file": "favicon.ico",
+      "bytes": 4255
+    },
+    {
+      "file": "favicon-16.png",
+      "bytes": 724
+    },
+    {
+      "file": "favicon-32.png",
+      "bytes": 1440
+    },
+    {
+      "file": "favicon-48.png",
+      "bytes": 2037
+    },
+    {
+      "file": "apple-touch-icon.png",
+      "bytes": 6219
+    },
+    {
+      "file": "icon-192.png",
+      "bytes": 6635
+    },
+    {
+      "file": "icon-512.png",
+      "bytes": 18866
+    }
+  ]
+}
