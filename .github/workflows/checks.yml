@@ -1,0 +1,37 @@
+name: Checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  accounts-and-access:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18.6-alpine@sha256:8a334ab9502c8ccb8d7dec4e83b36b5ce8ed7b396e585f1c86b0e69c416f4fca
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: cosmoformer_test_control
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d cosmoformer_test_control"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26.13.0'
+      - run: make deps
+      - run: node scripts/dev.mjs ci-test-init ${{ job.services.postgres.id }}
+      - run: node scripts/dev.mjs cert
+      - run: cd web && npx --no-install playwright install --with-deps chromium firefox
+      - run: make check

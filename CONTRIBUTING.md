@@ -1,6 +1,6 @@
 # Contributing to Cosmoformer
 
-Cosmoformer is an early-stage open-source infrastructure automation project. No functional product release is currently available, and the architecture and technology stack have not yet been finalized.
+Cosmoformer is an early-stage open-source infrastructure automation project. Local accounts and access control are implemented for development; no production release is available. The current implementation uses Go, PostgreSQL and React Router. See README.md for local setup and checks.
 
 ## Bugs and Feature Proposals
 
@@ -25,3 +25,7 @@ Report suspected security vulnerabilities privately as described in [SECURITY.md
 ## License
 
 See [LICENSE](LICENSE) for the project's MIT License.
+
+## Development checks
+
+Run `make test-db-start`, then `make check`; stop the throwaway database with `make test-db-stop`. Install Playwright Chromium/Firefox as described in the README first. Database tests require a marked test control database and refuse application-database fallback. Keep generated API specifications, frontend validators, credentials and design documents out of commits.
