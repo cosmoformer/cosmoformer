@@ -49,7 +49,7 @@ make check
 make test-db-stop
 ```
 
-Individual targets: `test-unit`, `test-integration`, `test-web`. `test-web` runs TypeScript checks, frontend unit/component tests with coverage, the production build, and Playwright journeys in Chromium and Firefox. The browser suite starts its own account server and exercises sign-in, setup, invitations, grant/revocation and empty-access flows. No cloud credentials or infrastructure are required. Safari is not covered by this automated suite.
+Individual targets: `test-unit`, `test-integration`, `test-web`. `test-web` runs TypeScript checks, frontend unit/component tests with coverage, the production build, and Playwright journeys in Chromium and Firefox. The browser suite serves the compiled SPA over local HTTPS, starts its own account server, and exercises sign-in, setup, invitations, grant/revocation and empty-access flows. No cloud credentials or infrastructure are required. Safari is not covered by this automated suite.
 
 Frontend tests use Vitest, React Testing Library and jsdom. They exercise the actual API client and Go-generated response validators with controlled HTTP responses, real router/theme contexts, and session timers. They cover error handling, CSRF headers, expiry and stale responses, setup/reset/sign-in forms, scope changes, account administration and team/grant controls. These tests do not replace browser checks or the server's permission tests.
 

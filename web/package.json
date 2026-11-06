@@ -6,6 +6,7 @@
     "contract": "node scripts/contract.mjs",
     "check": "react-router typegen && tsc --noEmit",
     "build": "react-router build",
+    "preview": "vite preview --host 127.0.0.1 --strictPort",
     "test": "playwright test",
     "test:unit": "vitest run",
     "test:unit:watch": "vitest",
