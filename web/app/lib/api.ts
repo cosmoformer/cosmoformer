@@ -6,7 +6,7 @@ export function setCSRF(value: string | null) { csrf = value; }
 export class APIError extends Error {
     constructor(public status: number, public code: string, message: string) { super(message); }
 }
-const known = new Set(['INVALID_REQUEST', 'SIGN_IN_REQUIRED', 'FORBIDDEN', 'NOT_FOUND', 'CONFLICT', 'INVALID_INPUT', 'TRY_AGAIN', 'UNAVAILABLE']);
+const known = new Set(['INVALID_REQUEST', 'SIGN_IN_REQUIRED', 'FORBIDDEN', 'NOT_FOUND', 'CONFLICT', 'INVALID_INPUT', 'TRY_AGAIN', 'UNAVAILABLE', 'RECONFIRM_SECRET_WRITE']);
 export async function api<K extends keyof Schema>(path: string, schema: K, options: {
     method?: string;
     body?: unknown;
@@ -18,7 +18,7 @@ export async function api<K extends keyof Schema>(path: string, schema: K, optio
     if (mutation) {
         headers['Content-Type'] = 'application/json';
         headers['X-Cosmoformer-Request'] = 'browser';
-        headers['Idempotency-Key'] = crypto.randomUUID().replaceAll('-', '');
+        headers['Idempotency-Key'] = crypto.randomUUID();
         if (csrf)
             headers['X-CSRF-Token'] = csrf;
     }

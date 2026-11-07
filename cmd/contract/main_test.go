@@ -35,8 +35,8 @@ func TestMainExportsContractWithoutDatabase(t *testing.T) {
 			t.Fatalf("missing implemented operation %s", path)
 		}
 	}
-	if len(contract.Paths["/worker/v1/poll"]) != 0 {
-		t.Fatal("exported unimplemented worker endpoint")
+	if len(contract.Paths["/worker/v1/poll"]) == 0 {
+		t.Fatal("missing implemented worker endpoint")
 	}
 }
 

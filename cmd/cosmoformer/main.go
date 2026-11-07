@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cosmoformer/cosmoformer/internal/config"
+	"github.com/cosmoformer/cosmoformer/internal/cryptostore"
 	"github.com/cosmoformer/cosmoformer/internal/httpapi"
 	"github.com/cosmoformer/cosmoformer/internal/identity"
 	"github.com/cosmoformer/cosmoformer/internal/store"
@@ -32,6 +33,53 @@ func run() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	switch os.Args[1] {
+	case "register-key":
+		if len(os.Args) != 2 {
+			return errors.New("register-key accepts no arguments")
+		}
+		key, e := config.ReadKey(os.Getenv("COSMOFORMER_ENCRYPTION_KEY_FILE"))
+		if e != nil {
+			return e
+		}
+		cipher, e := cryptostore.New(key)
+		if e != nil {
+			return e
+		}
+		fp := cipher.Fingerprint()
+		dsn, e := config.ReadSecret(os.Getenv("COSMOFORMER_MIGRATION_DSN_FILE"))
+		if e != nil {
+			return e
+		}
+		conn, e := pgx.Connect(ctx, dsn)
+		if e != nil {
+			return errors.New("operator database connection unavailable")
+		}
+		defer conn.Close(ctx)
+		tx, e := conn.Begin(ctx)
+		if e != nil {
+			return e
+		}
+		defer tx.Rollback(ctx)
+		var owner bool
+		if e = tx.QueryRow(ctx, `SELECT current_user='cosmoformer_owner'`).Scan(&owner); e != nil || !owner {
+			return errors.New("key registration requires the migration owner")
+		}
+		if _, e = tx.Exec(ctx, `SELECT id FROM cosmoformer.coordination_gate FOR UPDATE`); e != nil {
+			return e
+		}
+		var accepted bool
+		e = tx.QueryRow(ctx, `WITH u AS (UPDATE cosmoformer.installation SET active_key_fingerprint=$1 WHERE active_key_fingerprint IS NULL AND NOT EXISTS(SELECT FROM cosmoformer.crypto_keys) RETURNING id) SELECT EXISTS(SELECT FROM u)`, fp[:]).Scan(&accepted)
+		if e != nil || !accepted {
+			return errors.New("initial key already registered; key replacement requires offline rotation")
+		}
+		if _, e = tx.Exec(ctx, `INSERT INTO cosmoformer.crypto_keys(fingerprint,state) VALUES($1,'active')`, fp[:]); e != nil {
+			return e
+		}
+		if e = tx.Commit(ctx); e != nil {
+			return errors.New("key registration commit uncertain; inspect current metadata before retrying")
+		}
+		fmt.Println("Initial encryption key registered; key bytes remain outside the database.")
+		return nil
 	case "migrate":
 		f := flag.NewFlagSet("migrate", flag.ContinueOnError)
 		list := f.Bool("list", false, "list embedded forward migrations")
@@ -58,7 +106,7 @@ func run() error {
 		if e = store.Migrate(ctx, dsn); e != nil {
 			return e
 		}
-		fmt.Println("Database schema is current (version 4).")
+		fmt.Printf("Database schema is current (version %d).\n", store.SchemaVersion)
 		return nil
 	case "bootstrap-admin", "recover-admin":
 		return admin(ctx, os.Args[1], os.Args[2:])
@@ -76,7 +124,23 @@ func run() error {
 			return e
 		}
 		defer s.Pool.Close()
-		handler, _ := httpapi.New(s, c.Origin)
+		options := httpapi.Options{Background: ctx}
+		if keyPath := os.Getenv("COSMOFORMER_ENCRYPTION_KEY_FILE"); keyPath != "" {
+			key, e := config.ReadKey(keyPath)
+			if e != nil {
+				return e
+			}
+			options.Cipher, e = cryptostore.New(key)
+			if e != nil {
+				return e
+			}
+			fp := options.Cipher.Fingerprint()
+			var matches bool
+			if e = s.Pool.QueryRow(ctx, `SELECT active_key_fingerprint=$1 FROM cosmoformer.installation WHERE id`, fp[:]).Scan(&matches); e != nil || !matches {
+				return errors.New("encryption key does not match registered database identity")
+			}
+		}
+		handler, _ := httpapi.NewWithOptions(s, c.Origin, options)
 		server := &http.Server{Addr: c.Listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}
 		listener, e := net.Listen("tcp", c.Listen)
 		if e != nil {

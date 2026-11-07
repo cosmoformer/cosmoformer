@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"io"
 	"net"
 	"net/url"
 	"os"
@@ -46,4 +47,22 @@ func ReadSecret(path string) (string, error) {
 		return "", errors.New("cannot read protected input")
 	}
 	return strings.TrimSuffix(string(b), "\n"), nil
+}
+
+// ReadKey reads raw key bytes without text trimming or implicit encodings.
+func ReadKey(path string) ([]byte, error) {
+	f, e := os.Open(path)
+	if e != nil {
+		return nil, errors.New("cannot open encryption key file")
+	}
+	defer f.Close()
+	s, e := f.Stat()
+	if e != nil || !s.Mode().IsRegular() || s.Mode().Perm()&0077 != 0 || s.Size() != 32 {
+		return nil, errors.New("encryption key must be an owner-only regular file of exactly 32 raw bytes")
+	}
+	b := make([]byte, 32)
+	if _, e = io.ReadFull(f, b); e != nil {
+		return nil, errors.New("cannot read encryption key file")
+	}
+	return b, nil
 }

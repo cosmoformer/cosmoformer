@@ -78,6 +78,9 @@ func (c *client) login(name string) {
 	c.csrf = s["csrf_token"].(string)
 }
 func fixture(t *testing.T) (*testsupport.Database, *client) {
+	return fixtureOptions(t, httpapi.Options{})
+}
+func fixtureOptions(t *testing.T, options httpapi.Options) (*testsupport.Database, *client) {
 	t.Helper()
 	db := testsupport.NewDatabase(t)
 	ctx := context.Background()
@@ -89,7 +92,7 @@ func fixture(t *testing.T) (*testsupport.Database, *client) {
 	if _, e = db.Owner.Exec(ctx, `INSERT INTO cosmoformer.accounts(username,display_name,installation_admin,password_phc) VALUES('admin','Administrator',true,$1)`, phc); e != nil {
 		t.Fatal(e)
 	}
-	handler, _ := httpapi.New(db.App, origin)
+	handler, _ := httpapi.NewWithOptions(db.App, origin, options)
 	s := httptest.NewServer(handler)
 	t.Cleanup(s.Close)
 	c := &client{t: t, base: s.URL}

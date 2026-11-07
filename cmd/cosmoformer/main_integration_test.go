@@ -48,7 +48,7 @@ func TestMigrationCommand(t *testing.T) {
 	}
 	for i := 0; i < 2; i++ {
 		output, err := operator(t, binary, owner, "migrate").CombinedOutput()
-		requireExit(t, output, err, 0, "Database schema is current (version 4).")
+		requireExit(t, output, err, 0, "Database schema is current (version 5).")
 	}
 	if err := db.App.Ready(ctx); err != nil {
 		t.Fatal("CLI migrations did not provision a usable runtime schema", err)
@@ -56,14 +56,50 @@ func TestMigrationCommand(t *testing.T) {
 	runtime := protectedDSN(t, db.App.Pool.Config().ConnString())
 	output, err := operator(t, binary, runtime, "migrate").CombinedOutput()
 	requireExit(t, output, err, 1, "operator-provisioned owner/app roles are missing or unsafe")
-	if _, err := db.Owner.Exec(ctx, `UPDATE cosmoformer.schema_version SET version=5`); err != nil {
+	if _, err := db.Owner.Exec(ctx, `UPDATE cosmoformer.schema_version SET version=6`); err != nil {
 		t.Fatal(err)
 	}
 	output, err = operator(t, binary, owner, "migrate").CombinedOutput()
 	requireExit(t, output, err, 1, "FORWARD_ONLY_MIGRATIONS: database is newer than this binary")
 	var version int
-	if err := db.Owner.QueryRow(ctx, `SELECT version FROM cosmoformer.schema_version`).Scan(&version); err != nil || version != 5 {
+	if err := db.Owner.QueryRow(ctx, `SELECT version FROM cosmoformer.schema_version`).Scan(&version); err != nil || version != 6 {
 		t.Fatal("newer schema was modified", err)
+	}
+}
+
+func TestVersionFourUpgradesWithoutReplacingIdentity(t *testing.T) {
+	db := testsupport.NewDatabase(t)
+	ctx := context.Background()
+	// Only the marker-verified, randomly named throwaway test database is rebuilt
+	// to the actual four original SQL files. Production never loads source SQL.
+	if _, e := db.Owner.Exec(ctx, `DROP SCHEMA cosmoformer CASCADE`); e != nil {
+		t.Fatal(e)
+	}
+	for _, name := range []string{"001_identity_config.sql", "002_execution.sql", "003_evidence_catalog.sql", "004_security.sql"} {
+		raw, e := os.ReadFile(filepath.Join("..", "..", "internal", "store", "migrations", name))
+		if e != nil {
+			t.Fatal(e)
+		}
+		if _, e = db.Owner.Exec(ctx, string(raw)); e != nil {
+			t.Fatal(e)
+		}
+	}
+	if _, e := db.Owner.Exec(ctx, `CREATE TABLE cosmoformer.schema_version(version integer NOT NULL); INSERT INTO cosmoformer.schema_version VALUES(4); GRANT SELECT ON cosmoformer.schema_version TO cosmoformer_app`); e != nil {
+		t.Fatal(e)
+	}
+	var account string
+	if e := db.Owner.QueryRow(ctx, `INSERT INTO cosmoformer.accounts(username,display_name) VALUES('preserved','Preserved fixture') RETURNING id::text`).Scan(&account); e != nil {
+		t.Fatal(e)
+	}
+	if e := store.Migrate(ctx, db.OwnerDSN); e != nil {
+		t.Fatal(e)
+	}
+	if e := db.App.Ready(ctx); e != nil {
+		t.Fatal(e)
+	}
+	var same bool
+	if e := db.Owner.QueryRow(ctx, `SELECT EXISTS(SELECT FROM cosmoformer.accounts WHERE id=$1 AND username='preserved' AND credential_revision=1)`, account).Scan(&same); e != nil || !same {
+		t.Fatal("forward upgrade changed existing identity", e)
 	}
 }
 

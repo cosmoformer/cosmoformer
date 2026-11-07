@@ -69,3 +69,19 @@ func TestProtectedInputRejectsMissingEmptyAndOversized(t *testing.T) {
 		}
 	}
 }
+func TestRawEncryptionKeyDoesNotTrimBinaryBytes(t *testing.T) {
+	file := t.TempDir() + "/key"
+	key := make([]byte, 32)
+	key[31] = '\n'
+	if e := os.WriteFile(file, key, 0600); e != nil {
+		t.Fatal(e)
+	}
+	read, e := ReadKey(file)
+	if e != nil || len(read) != 32 || read[31] != '\n' {
+		t.Fatal("binary key was text-trimmed", e)
+	}
+	os.Chmod(file, 0644)
+	if _, e = ReadKey(file); e == nil {
+		t.Fatal("public key file accepted")
+	}
+}
