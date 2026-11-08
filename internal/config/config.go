@@ -6,14 +6,16 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
-type Config struct{ Listen, Origin, DSNFile string }
+type Config struct{ Listen, Origin, DSNFile, UnixSocket string }
 
 func Load() (Config, error) {
 	c := Config{Listen: os.Getenv("COSMOFORMER_LISTEN"), Origin: os.Getenv("COSMOFORMER_ORIGIN"), DSNFile: os.Getenv("COSMOFORMER_DATABASE_DSN_FILE")}
-	if c.Listen == "" {
+	c.UnixSocket = os.Getenv("COSMOFORMER_UNIX_SOCKET")
+	if c.Listen == "" && c.UnixSocket == "" {
 		c.Listen = "127.0.0.1:18080"
 	}
 	return c, c.Validate()
@@ -23,7 +25,11 @@ func (c Config) Validate() error {
 	if e != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" {
 		return errors.New("COSMOFORMER_ORIGIN must be an exact HTTPS origin without a path")
 	}
-	if _, _, e = net.SplitHostPort(c.Listen); e != nil {
+	if c.UnixSocket != "" {
+		if c.Listen != "" || !filepath.IsAbs(c.UnixSocket) {
+			return errors.New("Unix socket requires an absolute path and no TCP listen address")
+		}
+	} else if _, _, e = net.SplitHostPort(c.Listen); e != nil {
 		return errors.New("invalid listen address")
 	}
 	if c.DSNFile == "" {

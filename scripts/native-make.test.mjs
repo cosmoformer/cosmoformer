@@ -9,6 +9,18 @@ import {spawnSync} from 'node:child_process';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const original = JSON.parse(readFileSync(path.join(root, 'deploy/worker/runtimes.json'), 'utf8'));
 
+test('managed integration Make recipe preserves quoted test patterns as environment data', t => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'cf-make-'));
+    t.after(() => rmSync(dir, {recursive: true, force: true}));
+    writeFileSync(path.join(dir, 'Makefile'), readFileSync(path.join(root, 'Makefile')));
+    const node = path.join(dir, 'node');
+    writeFileSync(node, `#!${process.execPath}\nconsole.log(JSON.stringify(process.env.TEST_ARGS));\n`); chmodSync(node, 0o755);
+    const args = "-run 'TestOne|TestTwo' -count=1";
+    const result = spawnSync('make', ['--no-print-directory', 'test-integration-local', `NODE=${node}`, `TEST_ARGS=${args}`], {cwd: dir, encoding: 'utf8'});
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout.trim().split('\n').at(-1)), args);
+});
+
 function invoke(t, mutate = () => {}) {
     const dir = mkdtempSync(path.join(tmpdir(), 'cosmoformer-native-make-'));
     t.after(() => rmSync(dir, {recursive: true, force: true}));

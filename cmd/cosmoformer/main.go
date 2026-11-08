@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -142,14 +143,18 @@ func run() error {
 		}
 		handler, _ := httpapi.NewWithOptions(s, c.Origin, options)
 		server := &http.Server{Addr: c.Listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}
-		listener, e := net.Listen("tcp", c.Listen)
+		listener, e := listenAPI(c)
 		if e != nil {
-			return errors.New("cannot bind API listen address; choose an available local port")
+			return fmt.Errorf("cannot bind API listen address: %w", e)
 		}
 		defer listener.Close()
 		done := make(chan error, 1)
 		go func() { done <- server.Serve(listener) }()
-		fmt.Println("Cosmoformer API listening on", c.Listen)
+		address := c.Listen
+		if c.UnixSocket != "" {
+			address = c.UnixSocket
+		}
+		fmt.Println("Cosmoformer API listening on", address)
 		select {
 		case e := <-done:
 			if errors.Is(e, http.ErrServerClosed) {
@@ -164,6 +169,28 @@ func run() error {
 	default:
 		return errors.New("unknown command")
 	}
+}
+func listenAPI(c config.Config) (net.Listener, error) {
+	if c.UnixSocket == "" {
+		return net.Listen("tcp", c.Listen)
+	}
+	info, err := os.Stat(filepath.Dir(c.UnixSocket))
+	if err != nil {
+		return nil, errors.New("private API socket directory is unavailable")
+	}
+	owner, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || !info.IsDir() || info.Mode().Perm()&0077 != 0 || owner.Uid != uint32(os.Getuid()) {
+		return nil, errors.New("API socket directory must belong to this user and have mode 0700")
+	}
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: c.UnixSocket, Net: "unix"})
+	if err != nil {
+		return nil, err
+	}
+	if err = os.Chmod(c.UnixSocket, 0600); err != nil {
+		listener.Close()
+		return nil, err
+	}
+	return listener, nil
 }
 func admin(ctx context.Context, command string, args []string) error {
 	f := flag.NewFlagSet(command, flag.ContinueOnError)
