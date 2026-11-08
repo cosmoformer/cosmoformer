@@ -8,6 +8,7 @@ const fixture = vi.hoisted(() => ({
     calls: [] as { executable: string; args: string[]; options: any }[],
     label: 'test', exists: false, ready: true, tools: true,
     failure: null as null | ((args: string[]) => boolean),
+    missing: false,
 }));
 vi.mock('node:fs', () => ({
     mkdirSync: vi.fn(),
@@ -26,7 +27,16 @@ vi.mock('node:child_process', () => ({
     spawnSync: (executable: string, args: string[], options: any) => {
         fixture.calls.push({ executable, args, options });
         if (fixture.failure?.(args)) return { status: 1, stderr: 'synthetic command failure', stdout: '' };
-        if (args[0] === 'inspect') return { status: args.includes('--format') || fixture.exists ? 0 : 1, stdout: fixture.label, stderr: '' };
+        if (args[0] === 'info') return {status:0,stdout:'fixture-daemon',stderr:''};
+        if (args[0] === 'inspect') {
+            if (fixture.missing) return {status: 1, stdout: '', stderr: 'Error: No such object: fixture'};
+            let owner=fixture.label;
+            if(args.some(a=>a.includes('cosmoformer.test-owner')) && fixture.label==='test') {
+                const record=[...fixture.files.entries()].find(([file])=>file.endsWith('/container-intent.json'));
+                owner=record ? JSON.parse(record[1].toString()).owner : '';
+            }
+            return { status: args.includes('--format') || fixture.exists ? 0 : 1, stdout: owner, stderr: args.includes('--format') || fixture.exists ? '' : 'No such object: fixture' };
+        }
         if (args.includes('pg_isready')) return { status: fixture.ready ? 0 : 1, stdout: '', stderr: '' };
         if (args[0] === 'run' && args[1] === '--rm') return { status: 0, stdout: 'synthetic-test-container', stderr: '' };
         if (args[0] === 'run' && args[1] === '-d') return { status: 0, stdout: 'synthetic-dev-container', stderr: '' };
@@ -48,8 +58,9 @@ const testDir = path.join(root, '.build/testdb');
 const devDir = path.join(root, '.build/dev');
 
 beforeEach(() => {
+    vi.stubEnv('COSMOFORMER_TEST_DIR', '');
     vi.resetModules(); fixture.files.clear(); fixture.modes.clear(); fixture.calls.length = 0;
-    Object.assign(fixture, { label: 'test', exists: false, ready: true, tools: true, failure: null });
+    Object.assign(fixture, { label: 'test', exists: false, ready: true, tools: true, failure: null, missing: false });
     vi.spyOn(process, 'chdir').mockImplementation(() => {});
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -68,6 +79,19 @@ async function dev(action: string, ...args: string[]) {
 }
 
 describe('isolated database and local setup safeguards', () => {
+    it('keeps managed test controls inside their run directory and waits for final TCP startup', async () => {
+        const managed = path.join(root, '.build/test-runs/run-fixture');
+        vi.stubEnv('COSMOFORMER_TEST_DIR', managed);
+        expect(await dev('test-start')).toBe(0);
+        expect([...fixture.files.keys()].every(file => file.startsWith(managed + path.sep))).toBe(true);
+        const ready = fixture.calls.find(c => c.args.includes('pg_isready'))!;
+        expect(ready.args.slice(ready.args.indexOf('-h'), ready.args.indexOf('-h') + 2)).toEqual(['-h', '127.0.0.1']);
+    });
+    it('rejects managed control paths outside the dedicated test-runs directory', async () => {
+        vi.stubEnv('COSMOFORMER_TEST_DIR', devDir);
+        await expect(dev('test-start')).rejects.toThrow('inside .build/test-runs');
+        expect(fixture.calls).toHaveLength(0);
+    });
     it('marks a loopback-only throwaway database and protects its control files', async () => {
         expect(await dev('test-start')).toBe(0);
         const run = fixture.calls.find(c => c.args[0] === 'run')!;
@@ -107,8 +131,8 @@ describe('isolated database and local setup safeguards', () => {
     });
     it('fails on unavailable tools, failed commands and an unready database', async () => {
         fixture.tools = false; expect(await dev('test-start')).toBe(1);
-        vi.resetModules(); fixture.tools = true; fixture.failure = args => args[0] === 'run'; expect(await dev('test-start')).toBe(1);
-        vi.resetModules(); fixture.failure = null; fixture.ready = false; expect(await dev('test-start')).toBe(1);
+        vi.resetModules(); fixture.files.clear(); fixture.tools = true; fixture.failure = args => args[0] === 'run'; expect(await dev('test-start')).toBe(1);
+        vi.resetModules(); fixture.files.clear(); fixture.failure = null; fixture.ready = false; expect(await dev('test-start')).toBe(1);
         expect(fixture.calls.filter(c => c.args.includes('pg_isready'))).toHaveLength(60);
     });
     it('requires CI context and a bounded service identifier before initialization', async () => {
@@ -117,6 +141,45 @@ describe('isolated database and local setup safeguards', () => {
         expect(fixture.calls).toHaveLength(0);
         vi.resetModules(); expect(await dev('ci-test-init', 'a'.repeat(12))).toBe(0);
         expect(fixture.files.get(path.join(testDir, 'marker'))).toMatch(/^[a-f0-9]{64}$/);
+    });
+    it('retains a pre-created identity on lost response and cleans up by verified name', async () => {
+        fixture.failure=args=>args[0]==='run';
+        expect(await dev('test-start')).toBe(1);
+        const file=path.join(testDir,'container-intent.json');
+        const intent=JSON.parse(fixture.files.get(file)!.toString());
+        expect(intent.name).toMatch(/^cosmoformer-test-[a-f0-9]{32}$/);
+        expect(fixture.files.has(path.join(testDir,'container'))).toBe(false);
+        fixture.failure=null;vi.resetModules();
+        expect(await dev('test-stop')).toBe(0);
+        expect(fixture.calls.find(c=>c.args[0]==='stop')?.args).toEqual(['stop',intent.name]);
+        expect(fixture.files.has(file)).toBe(false);
+    });
+    it('does not remove a lost-response receipt when ownership differs', async () => {
+        fixture.failure=args=>args[0]==='run';expect(await dev('test-start')).toBe(1);
+        fixture.failure=null;fixture.label='foreign';vi.resetModules();
+        expect(await dev('test-stop')).toBe(1);
+        expect(fixture.files.has(path.join(testDir,'container-intent.json'))).toBe(true);
+        expect(fixture.calls.some(c=>c.args[0]==='stop')).toBe(false);
+    });
+    it('retains an unresolved creation even when an older container ID was present', async () => {
+        fixture.files.set(path.join(testDir, 'container'), 'stale-old-id');
+        fixture.failure = args => args[0] === 'run';
+        expect(await dev('test-start')).toBe(1);
+        expect(fixture.files.has(path.join(testDir, 'container'))).toBe(false);
+        fixture.failure = null; fixture.missing = true; vi.resetModules();
+        expect(await dev('test-stop')).toBe(1);
+        expect(fixture.files.has(path.join(testDir, 'container-intent.json'))).toBe(true);
+        fixture.missing = false; vi.resetModules();
+        expect(await dev('test-start')).toBe(1);
+        expect(fixture.calls.filter(c => c.args[0] === 'run')).toHaveLength(1);
+    });
+    it('clears a received creation receipt when Docker confirms the container is already gone', async () => {
+        expect(await dev('test-start')).toBe(0);
+        fixture.missing = true; vi.resetModules();
+        expect(await dev('test-stop')).toBe(0);
+        expect(fixture.files.has(path.join(testDir, 'container-intent.json'))).toBe(false);
+        expect(fixture.files.has(path.join(testDir, 'container'))).toBe(false);
+        expect(fixture.calls.some(c => c.args[0] === 'stop')).toBe(false);
     });
     it('creates private development credentials and bootstraps only once', async () => {
         expect(await dev('setup')).toBe(0);

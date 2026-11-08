@@ -14,7 +14,7 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/cosmoformer-worker ./cmd/worker \
  && CGO_ENABLED=0 go test -c -o /out/clock.test ./internal/clock \
  && CGO_ENABLED=0 go test -c -o /out/command.test ./cmd/worker
 
-FROM ${BASE_IMAGE} AS runtime
+FROM ${BASE_IMAGE} AS engine
 ARG TARGETARCH
 RUN test "$TARGETARCH" = amd64
 RUN rm -f /etc/apt/sources.list.d/debian.sources \
@@ -48,8 +48,10 @@ RUN set -eu; \
  rm -f /tmp/runtime.zip; apt-get purge -y curl unzip; rm -rf /var/lib/apt/lists/*; \
  groupadd --gid 10001 cosmoformer; useradd --uid 10001 --gid 10001 --no-create-home cosmoformer; \
  chown 10001:10001 /var/lib/cosmoformer/attempts
-COPY --from=build /out/cosmoformer-worker /usr/local/bin/cosmoformer-worker
 USER 10001:10001
+
+FROM engine AS runtime
+COPY --from=build /out/cosmoformer-worker /usr/local/bin/cosmoformer-worker
 ENTRYPOINT ["/usr/local/bin/cosmoformer-worker"]
 
 FROM runtime AS source-tests
@@ -86,5 +88,22 @@ COPY --from=native-test-build /out/acceptance.test /usr/local/bin/cosmoformer-na
 COPY --from=native-test-build /out/provider-mirror /fixtures/provider-mirror
 COPY deploy/worker/runtimes.json /fixtures/runtimes.json
 ENTRYPOINT ["/usr/local/bin/cosmoformer-native-tests", "-test.run=^TestNativeEngineCompatibility$", "-test.v", "-test.timeout=20m"]
+
+# Local tooling depends only on reviewed public packages, never application code.
+FROM engine AS local-provider-build
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends curl unzip
+RUN curl --fail --location --proto '=https' --proto-redir '=https' --max-time 120 \
+    https://releases.hashicorp.com/terraform-provider-aws/6.41.0/terraform-provider-aws_6.41.0_linux_amd64.zip -o /tmp/aws.zip \
+ && echo '4e8de5f3fcc3e3f41b6703ad4c0fa62175d0c29afcf56ac82eb16c604bb6dafa  /tmp/aws.zip' | sha256sum -c - \
+ && mkdir -p /mirror/registry.opentofu.org/hashicorp/aws/6.41.0/linux_amd64 \
+ && unzip -j /tmp/aws.zip terraform-provider-aws_v6.41.0_x5 LICENSE.txt -d /mirror/registry.opentofu.org/hashicorp/aws/6.41.0/linux_amd64 \
+ && chmod 755 /mirror/registry.opentofu.org/hashicorp/aws/6.41.0/linux_amd64/terraform-provider-aws_v6.41.0_x5
+
+FROM engine AS local-tofu
+COPY --from=local-provider-build /mirror /fixtures/provider-mirror
+# Retain the original mirror bytes so existing dependency locks stay valid.
+COPY deploy/local/aws-package.json /fixtures/provider-mirror/registry.opentofu.org/hashicorp/aws/6.41.0/linux_amd64/cosmoformer-package.json
+ENTRYPOINT ["/usr/local/bin/tofu"]
 
 FROM runtime AS worker

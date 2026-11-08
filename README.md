@@ -23,9 +23,50 @@ make dev-web
 
 Open [the local workspace](https://localhost:5173/account/setup). The development certificate is self-signed; accept the local certificate exception in your browser. Username is `admin`; choose your own password using the one-use code saved in `.build/dev/admin-setup-code`. Read that file locally and enter its contents in the setup form. No default password is created. After setup, sign in explicitly.
 
-The database listens only on `127.0.0.1:54329`; the API on `127.0.0.1:18080`; the HTTPS frontend on `127.0.0.1:5173`. The frontend forwards same-origin API requests. Generated credentials and certificates stay in owner-readable files inside ignored `.build/dev/`. Never commit or share that directory.
+The database listens only on `127.0.0.1:54329`; the HTTPS frontend on `127.0.0.1:5173`. The frontend and seed client reach the API through the owner-only `.build/dev/api.sock` Unix socket, inside a private directory. Another local user cannot impersonate the API by occupying a TCP port. Generated credentials and certificates stay in owner-readable files inside ignored `.build/dev/`. Never commit or share that directory. A crashed API may leave a stale socket; verify that its server has stopped before removing it.
 
 `make dev-stop` stops the recorded development database and retains its data. Repeat `make dev-setup` to restart it; bootstrap never reopens after completion. Stop the two foreground servers with Ctrl-C.
+
+### Development commands
+
+Run `make dev` for one foreground session after installing tools/dependencies. It starts the local dependencies, rebuilds the API and browser contract when Go sources or embedded SQL contents change, restarts the API, and starts the frontend with its existing reload support. Logs share the terminal. Ctrl-C stops the API/frontend and any database or S3 service started by that session; services already running are retained. A failed initial build or occupied API/frontend port exits with an error. Schema changes still need explicit `make dev-setup`; serving never migrates implicitly. The separate `dev-api` and `dev-web` commands remain available.
+
+`make doctor` checks the pinned tools, Docker, frontend dependencies, certificate/key, database schema, S3 buckets/versioning and local ports, and prints a repair command for each problem. It performs no setup or migrations. If a development process was forcibly killed, check the PID in `.build/dev/session.lock/pid` before removing that stale lock. Normal shutdown removes it automatically.
+
+`make dev-seed` adds **Local demo → Sandbox → Development**, a **Local developers** team, and an environment Planner grant for the administrator running the command. Start the API and complete administrator password setup first. Save that chosen password in an owner-only file using a private editor, then run:
+
+```sh
+chmod 600 /absolute/path/to/local-password-file
+SEED_PASSWORD_FILE=/absolute/path/to/local-password-file make dev-seed
+```
+
+The username defaults to `admin`; override it with `SEED_USERNAME`. Passwords are read from the protected file, never command arguments or logs. Seeding uses the authenticated local API, preserves existing records, rejects ambiguous sample names, and can be repeated without duplicates. It creates no default password, account, source connection or cloud resources. Its API session is logged out afterward.
+
+### Local S3 and OpenTofu
+
+`make dev-setup` also starts digest-pinned SeaweedFS **4.47** in Docker and builds a Linux amd64 runner using the existing checksum-pinned OpenTofu **1.13.8** and AWS provider **6.41.0**. Run `make dev-storage` to start only storage and the fixture. The first build downloads public dependencies; runs install providers only from the bundled filesystem mirror.
+
+Authenticated S3 listens at `http://127.0.0.1:18333`; other SeaweedFS ports are not published. Generated local credentials and configuration stay in owner-readable `.build/local/dev/`. Configuration is copied into a separate owned Docker volume with private permissions for the image's SeaweedFS user, including on Linux hosts whose UID differs. Its `runner.env` contains credentials for other local S3 clients; do not source it into a shell used for real AWS work. Containers use `http://seaweed:8333`.
+
+Harness-owned buckets separate versioned state (`cosmoformer-state`), development artifacts (`cosmoformer-artifacts`) and fixture resources (`cosmoformer-resources`). The [OpenTofu fixture](tests/local/main.tf) creates `example.txt` through the AWS provider pointed at SeaweedFS. No AWS account or Docker provider is needed.
+
+```sh
+make dev-tofu                              # plan
+make dev-tofu TOFU_ARGS='plan -out=local.plan'
+make dev-tofu TOFU_ARGS='apply local.plan'
+make dev-tofu TOFU_ARGS='apply -var=content=changed'
+make dev-tofu TOFU_ARGS='destroy'
+```
+
+Commands run in `.build/local/dev/work/`. Starting storage refreshes the generated `main.tf` from the source fixture. State, objects and filer metadata persist in a recorded Docker volume across `make dev-stop` and `make dev-storage`. Stop retains database and S3 data; `destroy` removes only fixture-managed resources. The API/frontend still use `make dev-api` and `make dev-web`. Each OpenTofu command has its own runner identity; a failed command can clean up only its own runner. Avoid concurrent development commands against the same work directory, since they still share configuration and plan files.
+
+Storage setup resumes incomplete provisioning with the recorded identity and credentials and verifies resource ownership before reuse. It records start intent before SeaweedFS can write data. Once storage may have been used, a missing data volume requires explicit recovery; setup never replaces it with an empty volume. Older receipts without an initialization phase are treated conservatively: their recorded volume must still exist. Verify whether a legacy failed setup ever held data before manually removing its receipt or resources.
+
+`make test-local` builds the same runner and creates a separate SeaweedFS container, internal network, volume, random loopback port and credentials per invocation. It checks interrupted setup recovery, missing initialized-volume protection, authentication, saved-plan apply, no-op planning, updates, state lineage/serial, restart persistence, external drift and repair, concurrent conditional lock writes, native lock contention, artifact round trips and destruction. It removes its recorded resources on success or failure, without development-storage fallback. After a hard process interruption, `.build/local/test-*/environment.json` identifies any resources needing manual cleanup. This suite is included in `make check` alongside the existing synthetic native tests.
+
+The runner has a read-only root filesystem, only generated local credentials and fixture mounts, and no Docker socket or host credential mounts. Its internal Docker network has no external routing. These standalone engine/storage exercises do not enable native plans or artifact writes through the application. Custom endpoints stay in the local harness; production validation and AWS owner/IAM requirements are unchanged. Passing fixtures establish pinned local compatibility, not general AWS service parity.
+
+The local runner image builds independently of application code and acceptance-test compilation. Its AWS binary, license and original mirror metadata are retained byte-for-byte so existing provider locks remain valid.
 
 ## Accounts and permissions
 
@@ -39,6 +80,8 @@ Project grants inherit to all environments; environment grants add access. Viewe
 Disabling an account revokes its sessions immediately. Password setup/reset revokes existing sessions and proofs without changing grants. Sessions expire after one hour idle or twelve hours from sign-in. Only intentional activity renews idle time; background reads do not. Password reset is administrator-assisted; there is no email delivery or public signup.
 
 ## Checks
+
+`make test-integration-local` starts a fresh PostgreSQL container, runs the host integration suite, then removes the container and its protected control files. Each invocation uses its own `.build/test-runs/run-*` directory and random port, independently of the development DB and manually managed test DB. `TEST_ARGS` can select tests, for example `make test-integration-local TEST_ARGS="-run 'TestLocalDevelopmentSeed|TestBootstrap' -count=1"`. Cleanup also runs after test failures or Ctrl-C. Creation identity is saved before Docker starts, so cleanup can find an owned container even if its creation reply is lost. If Docker cannot confirm the outcome, the receipt is retained for recovery; run `COSMOFORMER_TEST_DIR=/absolute/path/to/run-directory node scripts/dev.mjs test-stop` after Docker settles. A forced kill may also require this cleanup; do not remove other runs' resources. The command overrides inherited test DSNs with its own marker-checked database. The seed acceptance test exercises the actual Node client against the Go API and PostgreSQL twice and verifies the resulting grants and logout.
 
 Tests use a separate throwaway PostgreSQL container, marker-checked control database, generated per-test databases, and a non-owner runtime role. They never fall back to the development database.
 
@@ -59,7 +102,7 @@ Native checks cover exact Git commits, AWS/null schemas, output-only roots witho
 
 Key validation uses the selected pinned runtime: both reject leading/trailing slashes in raw keys and prefixes; Terraform also rejects repeated slashes in raw keys. OpenTofu accepts those keys. Both accept repeated internal prefix slashes and use native joining for non-default workspaces. Invalid keys are rejected before joining, never cleaned into another destination. Update existing fixture declarations explicitly and run a fresh source check; no state, permanent claim or queued assignment is automatically rewritten. Company compatibility remains unassessed.
 
-Individual targets: `test-unit`, `test-integration`, `test-source`, `test-scripts`, `test-native`, `test-web`. `test-source` includes worker-command startup and clock tests inside the baked Linux image, so these checks cannot silently skip in normal CI. `test-scripts` verifies profile merging, actual contract generation and the real Make native-test recipe with stubbed Docker commands; both are included in `make check`. `test-web` runs TypeScript checks, frontend unit/component tests with coverage, the production build, and Playwright journeys in Chromium and Firefox. The browser suite serves the compiled SPA over local HTTPS, starts its own account server, and exercises sign-in, setup, invitations, grant/revocation and empty-access flows. Source settings, secret-write errors, source-check controls and worker credential visibility also have component tests against the actual generated API validators. Safari is not covered by this automated suite.
+Individual targets: `test-unit`, `test-integration`, `test-source`, `test-scripts`, `test-native`, `test-local`, `test-web`. `test-source` includes worker-command startup and clock tests inside the baked Linux image, so these checks cannot silently skip in normal CI. `test-scripts` verifies profile merging, actual contract generation and the real Make native-test recipe with stubbed Docker commands; both are included in `make check`. `test-web` runs TypeScript checks, frontend unit/component tests with coverage, the production build, and Playwright journeys in Chromium and Firefox. The browser suite serves the compiled SPA over local HTTPS, starts its own account server, and exercises sign-in, setup, invitations, grant/revocation and empty-access flows. Source settings, secret-write errors, source-check controls and worker credential visibility also have component tests against the actual generated API validators. Safari is not covered by this automated suite.
 
 Frontend tests use Vitest, React Testing Library and jsdom. They exercise the actual API client and Go-generated response validators with controlled HTTP responses, real router/theme contexts, and session timers. They cover error handling, CSRF headers, expiry and stale responses, setup/reset/sign-in forms, scope changes, account administration and team/grant controls. These tests do not replace browser checks or the server's permission tests.
 

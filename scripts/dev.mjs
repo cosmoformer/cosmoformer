@@ -14,7 +14,10 @@ function executable(command) {
     return file;
 }
 const action = process.argv[2];
-const dir = path.join(root, (action?.startsWith('test-') || action === 'ci-test-init') ? '.build/testdb' : '.build/dev');
+const testing = action?.startsWith('test-') || action === 'ci-test-init';
+const isolated = process.env.COSMOFORMER_TEST_DIR;
+if (testing && isolated && path.dirname(path.resolve(isolated)) !== path.join(root, '.build/test-runs')) throw new Error('Managed test directory must be inside .build/test-runs.');
+const dir = testing && isolated ? path.resolve(isolated) : path.join(root, testing ? '.build/testdb' : '.build/dev');
 mkdirSync(dir, { recursive: true, mode: 0o700 });
 chmodSync(dir, 0o700);
 function run(command, args, opts = {}) { const r = spawnSync(executable(command), args, { encoding: 'utf8', stdio: 'pipe', ...opts }); if (r.status !== 0)
@@ -23,7 +26,9 @@ function secret(name, value) { const p = path.join(dir, name); writeFileSync(p, 
 function go(args, env = {}) { const local = path.join(root, '.build/tools/go/bin/go'); return run(existsSync(local) ? local : 'go', args, { env: { ...process.env, GOCACHE: path.join(root, '.build/go-cache'), GOPATH: path.join(root, '.build/gopath'), ...env } }); }
 function container() { return existsSync(path.join(dir, 'container')) ? readFileSync(path.join(dir, 'container'), 'utf8').trim() : null; }
 function wait(id, user, db) { for (let i = 0; i < 60; i++) {
-    const p = spawnSync(executable('docker'), ['exec', id, 'pg_isready', '-U', user, '-d', db], { stdio: 'ignore' });
+    // The image's temporary initialization server accepts Unix sockets before
+    // restarting. TCP readiness waits for the final server instead.
+    const p = spawnSync(executable('docker'), ['exec', id, 'pg_isready', '-h', '127.0.0.1', '-U', user, '-d', db], { stdio: 'ignore' });
     if (p.status === 0)
         return;
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
@@ -80,11 +85,22 @@ try {
         console.log('Stopped the recorded development database; its data is retained.');
     }
     else if (action === 'test-start') {
+        if (existsSync(path.join(dir, 'container-intent.json'))) throw new Error('Test database creation is already recorded; run test-stop for this directory before retrying.');
         const old = container();
-        if (old && spawnSync(executable('docker'), ['inspect', old], { stdio: 'ignore' }).status === 0)
-            throw new Error('Test database already recorded; use make test-db-stop first.');
+        if (old) {
+            run('docker', ['info', '--format', '{{.ID}}']);
+            const inspect = spawnSync(executable('docker'), ['inspect', old], {encoding: 'utf8'});
+            if (inspect.status === 0) throw new Error('Test database already recorded; use make test-db-stop first.');
+            if (inspect.status !== 1 || !/No such (object|container)/i.test(inspect.stderr ?? '')) throw new Error('Cannot verify the previously recorded test database; retain its receipt for recovery.');
+        }
+        // A stale ID must not count as a received reply for this new creation.
+        rmSync(path.join(dir, 'container'), {force: true});
         const marker = randomBytes(32).toString('hex');
-        const id = run('docker', ['run', '--rm', '-d', '--label', 'cosmoformer.local=test', '-p', '127.0.0.1::5432', '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', '-e', 'POSTGRES_DB=cosmoformer_test_control', image]);
+        const intent = {name: `cosmoformer-test-${randomBytes(16).toString('hex')}`, owner: randomBytes(32).toString('hex')};
+        // Persist identity before Docker can create anything, including when
+        // cancellation or response loss prevents receiving its container ID.
+        secret('container-intent.json', JSON.stringify(intent));
+        const id = run('docker', ['run', '--rm', '-d', '--name', intent.name, '--label', 'cosmoformer.local=test', '--label', `cosmoformer.test-owner=${intent.owner}`, '-p', '127.0.0.1::5432', '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', '-e', 'POSTGRES_DB=cosmoformer_test_control', image]);
         secret('container', id);
         wait(id, 'postgres', 'cosmoformer_test_control');
         run('docker', ['exec', '-i', id, 'psql', '-U', 'postgres', '-d', 'cosmoformer_test_control', '-v', 'ON_ERROR_STOP=1'], { input: `CREATE TABLE test_marker(value text NOT NULL); INSERT INTO test_marker VALUES('${marker}'); CREATE ROLE cosmoformer_owner LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS; CREATE ROLE cosmoformer_app LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;` });
@@ -94,15 +110,34 @@ try {
         console.log('Isolated test database ready.');
     }
     else if (action === 'test-stop') {
-        const id = container();
-        if (id) {
-            const label = run('docker', ['inspect', '--format', '{{index .Config.Labels "cosmoformer.local"}}', id]);
-            if (label !== 'test')
-                throw new Error('Refusing to stop an unmarked container.');
-            run('docker', ['stop', id]);
-            rmSync(path.join(dir, 'container'));
+        const intentFile = path.join(dir, 'container-intent.json');
+        if (existsSync(intentFile)) {
+            const intent = JSON.parse(readFileSync(intentFile, 'utf8'));
+            if (!/^cosmoformer-test-[a-f0-9]{32}$/.test(intent.name) || !/^[a-f0-9]{64}$/.test(intent.owner)) throw new Error('Invalid test database creation identity; retain it for recovery.');
+            run('docker', ['info', '--format', '{{.ID}}']);
+            const inspect = spawnSync(executable('docker'), ['inspect', '--format', '{{index .Config.Labels "cosmoformer.test-owner"}}', intent.name], {encoding: 'utf8'});
+            if (inspect.status !== 0) {
+                if (!container()) throw new Error('Test database creation outcome is unresolved; retain this directory and retry cleanup after Docker settles.');
+                // A successfully received ID plus absence means --rm already
+                // removed the container; a missing creation reply proves less.
+                if (inspect.status !== 1 || !/No such (object|container)/i.test(inspect.stderr ?? '')) throw new Error('Cannot verify test database cleanup.');
+            } else {
+                if (inspect.stdout.trim() !== intent.owner) throw new Error('Refusing to stop a test container owned by another invocation.');
+                run('docker', ['stop', intent.name]);
+            }
+            rmSync(path.join(dir, 'container'), {force: true}); rmSync(intentFile);
+            console.log('Stopped the owned throwaway test database.');
+        } else {
+            const id = container();
+            if (id) {
+                const label = run('docker', ['inspect', '--format', '{{index .Config.Labels "cosmoformer.local"}}', id]);
+                if (label !== 'test')
+                    throw new Error('Refusing to stop an unmarked container.');
+                run('docker', ['stop', id]);
+                rmSync(path.join(dir, 'container'));
+            }
+            console.log('Stopped the recorded throwaway test database.');
         }
-        console.log('Stopped the recorded throwaway test database.');
     }
     else
         throw new Error('Use setup, stop, test-start or test-stop.');

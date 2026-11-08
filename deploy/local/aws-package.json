@@ -1,0 +1,10 @@
+{
+  "source_addresses": [
+    "registry.opentofu.org/hashicorp/aws"
+  ],
+  "version": "6.41.0",
+  "arch": "linux_amd64",
+  "archive_url": "https://releases.hashicorp.com/terraform-provider-aws/6.41.0/terraform-provider-aws_6.41.0_linux_amd64.zip",
+  "sha256": "4e8de5f3fcc3e3f41b6703ad4c0fa62175d0c29afcf56ac82eb16c604bb6dafa",
+  "member": "terraform-provider-aws_v6.41.0_x5"
+}

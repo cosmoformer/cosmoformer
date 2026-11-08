@@ -1,6 +1,8 @@
 SHELL := /bin/sh
 GO := $(if $(wildcard .build/tools/go/bin/go),$(CURDIR)/.build/tools/go/bin/go,go)
+NODE := $(if $(wildcard .build/tools/node-v26.13.0-*/bin/node),$(firstword $(wildcard $(CURDIR)/.build/tools/node-v26.13.0-*/bin/node)),node)
 TEST_ARGS ?=
+export TEST_ARGS
 export GOCACHE := $(CURDIR)/.build/go-cache
 export GOPATH := $(CURDIR)/.build/gopath
 export PATH := $(firstword $(wildcard $(CURDIR)/.build/tools/node-v26.13.0-*/bin)):$(PATH)
@@ -10,10 +12,10 @@ export COSMOFORMER_TEST_MARKER_FILE ?= $(CURDIR)/.build/testdb/marker
 .PHONY: brand tools deps dev-setup dev-api dev-web dev-stop contract test-db-start test-db-stop test-unit test-integration test-source test-native test-scripts worker-image test-coverage test-go-coverage test-linux-coverage test-contract-coverage test-web-unit test-web-coverage test-web browser-server check
 
 brand:
-	node scripts/brand.mjs
+	$(NODE) scripts/brand.mjs
 
 tools:
-	node scripts/tools.mjs
+	$(NODE) scripts/tools.mjs
 
 deps:
 	$(GO) mod download
@@ -23,22 +25,52 @@ contract:
 	cd web && COSMOFORMER_GO=$(GO) npm run contract
 
 dev-setup:
-	node scripts/dev.mjs setup
+	$(NODE) scripts/dev.mjs setup
+	$(MAKE) dev-storage
 
 dev-api:
-	COSMOFORMER_LISTEN=127.0.0.1:18080 COSMOFORMER_ORIGIN=https://localhost:5173 COSMOFORMER_DATABASE_DSN_FILE=$(CURDIR)/.build/dev/app.dsn $(GO) run ./cmd/cosmoformer serve
+	COSMOFORMER_LISTEN= COSMOFORMER_UNIX_SOCKET=$(CURDIR)/.build/dev/api.sock COSMOFORMER_ORIGIN=https://localhost:5173 COSMOFORMER_DATABASE_DSN_FILE=$(CURDIR)/.build/dev/app.dsn $(GO) run ./cmd/cosmoformer serve
 
 dev-web: contract
 	cd web && npm run dev
 
 dev-stop:
-	node scripts/dev.mjs stop
+	$(NODE) scripts/dev.mjs stop
+	$(NODE) scripts/local-env.mjs stop
+
+# Reuses the checksum-pinned OpenTofu runtime and offline AWS provider mirror.
+.PHONY: local-image dev-storage dev-tofu test-local
+.PHONY: dev doctor dev-seed test-integration-local
+dev:
+	$(NODE) scripts/workflows.mjs dev
+
+doctor:
+	$(NODE) scripts/doctor.mjs
+
+dev-seed:
+	$(NODE) scripts/dev-seed.mjs
+
+test-integration-local:
+	$(NODE) scripts/workflows.mjs test
+
+TOFU_ARGS ?= plan
+local-image:
+	docker build --platform linux/amd64 --target local-tofu -f deploy/worker/Dockerfile -t cosmoformer-local-tofu:1.13.8 .
+
+dev-storage: local-image
+	$(NODE) scripts/local-env.mjs up
+
+dev-tofu:
+	$(NODE) scripts/local-env.mjs tofu $(TOFU_ARGS)
+
+test-local: local-image
+	$(NODE) scripts/local-env.mjs test
 
 test-db-start:
-	node scripts/dev.mjs test-start
+	$(NODE) scripts/dev.mjs test-start
 
 test-db-stop:
-	node scripts/dev.mjs test-stop
+	$(NODE) scripts/dev.mjs test-stop
 
 test-unit:
 	$(GO) test -race ./internal/... ./cmd/...
@@ -79,10 +111,10 @@ endef
 
 test-native: export COSMOFORMER_NATIVE_TEST_SCRIPT = $(NATIVE_TEST_SCRIPT)
 test-native:
-	@node --input-type=module -e "$$COSMOFORMER_NATIVE_TEST_SCRIPT"
+	@$(NODE) --input-type=module -e "$$COSMOFORMER_NATIVE_TEST_SCRIPT"
 
 test-scripts:
-	COSMOFORMER_GO=$(GO) node --test scripts/merge-go-coverage.test.mjs scripts/native-make.test.mjs web/scripts/contract.test.mjs
+	COSMOFORMER_GO=$(GO) $(NODE) --test scripts/merge-go-coverage.test.mjs scripts/native-make.test.mjs scripts/workflow-lib.test.mjs scripts/local-api.test.mjs scripts/local-env.test.mjs web/scripts/contract.test.mjs
 
 worker-image:
 	docker build --quiet --platform linux/amd64 --target worker -f deploy/worker/Dockerfile -t cosmoformer-worker:local .
@@ -91,7 +123,7 @@ test-coverage: test-go-coverage test-web-coverage test-contract-coverage
 
 test-contract-coverage:
 	mkdir -p .build/coverage/contract
-	COSMOFORMER_GO=$(GO) node --test --experimental-test-coverage --test-coverage-include=web/scripts/contract.mjs --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=.build/coverage/contract/lcov.info web/scripts/contract.test.mjs
+	COSMOFORMER_GO=$(GO) $(NODE) --test --experimental-test-coverage --test-coverage-include=web/scripts/contract.mjs --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=.build/coverage/contract/lcov.info web/scripts/contract.test.mjs
 
 # Includes acceptance calls in the same profile as unit tests; never use the dev DB.
 test-go-coverage: test-linux-coverage
@@ -101,8 +133,8 @@ test-go-coverage: test-linux-coverage
 	COSMOFORMER_TEST_COVER_DIR="$$cover_dir" $(GO) test -race -count=1 -tags=integration -covermode=atomic -coverpkg=./internal/...,./cmd/... ./internal/... ./cmd/... ./tests/acceptance -args -test.gocoverdir="$$cover_dir"; \
 	$(GO) tool covdata textfmt -i="$$cover_dir" -o=.build/coverage/go.host.out
 	mkdir -p .build/coverage/scripts
-	node --test --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=.build/coverage/scripts/lcov.info scripts/merge-go-coverage.test.mjs
-	node scripts/merge-go-coverage.mjs .build/coverage/go.out .build/coverage/go.host.out .build/coverage/linux/source.out .build/coverage/linux/worker.out .build/coverage/linux/clock.out .build/coverage/linux/command.out
+	$(NODE) --test --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=.build/coverage/scripts/lcov.info scripts/merge-go-coverage.test.mjs
+	$(NODE) scripts/merge-go-coverage.mjs .build/coverage/go.out .build/coverage/go.host.out .build/coverage/linux/source.out .build/coverage/linux/worker.out .build/coverage/linux/clock.out .build/coverage/linux/command.out
 	$(GO) tool cover -func=.build/coverage/go.out
 	$(GO) tool cover -html=.build/coverage/go.out -o=.build/coverage/go.html
 
@@ -135,4 +167,5 @@ check:
 	$(MAKE) test-source
 	$(MAKE) test-scripts
 	$(MAKE) test-native
+	$(MAKE) test-local
 	$(MAKE) test-web

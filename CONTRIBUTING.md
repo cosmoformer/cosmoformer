@@ -28,6 +28,8 @@ See [LICENSE](LICENSE) for the project's MIT License.
 
 ## Development checks
 
+`make test-local` exercises real OpenTofu against disposable SeaweedFS S3 storage and is included in `make check`. It uses separate containers, volumes, networks and credentials from `make dev-storage`. See the README for local fixture commands and the boundary between standalone engine tests and application execution.
+
 Run `make test-db-start`, then `make check`; stop the throwaway database with `make test-db-stop`. Install Playwright Chromium/Firefox as described in the README first. Database tests require a marked test control database and refuse application-database fallback. Keep generated API specifications, frontend validators, credentials and design documents out of commits.
 
 Phase-2 checks include the isolated Linux `test-source` image, with external networking disabled during test execution. Source/API fixtures use invented repositories, accounts, state destinations and credentials. Do not replace them with company data or enable test endpoint overrides in production configuration. The version-5 migration is forward-only; do not rewrite the four already delivered migrations. New source routes must retain current authorization, generation/ticket fencing, exact replay identities and explicit proof before releasing an assignment. No test/check publishes an image, deploys a service or accesses AWS.

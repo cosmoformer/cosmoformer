@@ -34,6 +34,7 @@ func TestProtectedInput(t *testing.T) {
 }
 
 func TestLoadAndRequiredSettings(t *testing.T) {
+	t.Setenv("COSMOFORMER_UNIX_SOCKET", "")
 	t.Setenv("COSMOFORMER_LISTEN", "")
 	t.Setenv("COSMOFORMER_ORIGIN", "https://localhost:5173")
 	t.Setenv("COSMOFORMER_DATABASE_DSN_FILE", "protected.dsn")
@@ -49,6 +50,25 @@ func TestLoadAndRequiredSettings(t *testing.T) {
 	t.Setenv("COSMOFORMER_DATABASE_DSN_FILE", "")
 	if _, err := Load(); err == nil {
 		t.Fatal("missing protected DSN accepted")
+	}
+}
+func TestUnixSocketConfiguration(t *testing.T) {
+	t.Setenv("COSMOFORMER_LISTEN", "")
+	t.Setenv("COSMOFORMER_UNIX_SOCKET", "/private/api.sock")
+	t.Setenv("COSMOFORMER_ORIGIN", "https://localhost:5173")
+	t.Setenv("COSMOFORMER_DATABASE_DSN_FILE", "protected.dsn")
+	c, err := Load()
+	if err != nil || c.Listen != "" || c.UnixSocket != "/private/api.sock" {
+		t.Fatal(c, err)
+	}
+	t.Setenv("COSMOFORMER_LISTEN", "127.0.0.1:18080")
+	if _, err = Load(); err == nil {
+		t.Fatal("simultaneous TCP and Unix endpoints accepted")
+	}
+	t.Setenv("COSMOFORMER_LISTEN", "")
+	t.Setenv("COSMOFORMER_UNIX_SOCKET", "relative.sock")
+	if _, err = Load(); err == nil {
+		t.Fatal("relative Unix endpoint accepted")
 	}
 }
 
