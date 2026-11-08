@@ -90,6 +90,20 @@ func (p *Pipe) Feed(b []byte, eof bool) []byte {
 			out[i] = '*'
 		}
 	}
+	// Keep a partial character in this pipe, alongside the secret overlap,
+	// before the masked stdout/stderr chunks can be combined.
+	if !eof {
+		for i := 0; i < len(out); {
+			if !utf8.FullRune(out[i:]) {
+				count = i
+				out = out[:i]
+				break
+			}
+			_, n := utf8.DecodeRune(out[i:])
+			i += n
+		}
+	}
+	out = bytes.ToValidUTF8(out, []byte("\uFFFD"))
 	p.pending = append(p.pending[:0], p.pending[count:]...)
 	p.mask = append(p.mask[:0], p.mask[count:]...)
 	return out
@@ -126,50 +140,117 @@ type Segment struct {
 	Gap      *Gap    `json:"gap,omitempty"`
 }
 
-// Queue preserves loss as an explicit ordered range, including a trailing gap.
+// Queue reserves fixed metadata and coalesces small reads into bounded blocks.
+// Leave room inside WorkerBuffer for the ring, a Peek snapshot and UTF-8 work.
+const queueBlockBytes = 65536
+const queuePayloadBytes = WorkerBuffer - 2*queueBlockBytes
+const queueEntries = 256
+
+type queuedSegment struct {
+	sequence, start, end int64
+	data                 []byte
+	gap                  bool
+	sealed               bool
+}
 type Queue struct {
-	mu           sync.Mutex
-	segments     []Segment
-	bytes        int
-	next, offset int64
-	sealed       int64
-	peeked       bool
+	mu                 sync.Mutex
+	entries            [queueEntries]queuedSegment
+	head, count, bytes int
+	next, offset       int64
 }
 
+func (q *Queue) tail() *queuedSegment {
+	if q.count == 0 {
+		return nil
+	}
+	return &q.entries[(q.head+q.count-1)%queueEntries]
+}
+func (q *Queue) addGap(n int) {
+	end := q.offset + int64(n)
+	if tail := q.tail(); tail != nil && tail.gap && !tail.sealed {
+		tail.end = end
+	} else {
+		q.entries[(q.head+q.count)%queueEntries] = queuedSegment{sequence: q.next, start: q.offset, end: end, gap: true}
+		q.count++
+		q.next++
+	}
+	q.offset = end
+}
 func (q *Queue) Append(b []byte) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	for len(b) > 0 {
-		n := min(len(b), int(SegmentMax/8))
-		v := string(bytes.ToValidUTF8(b[:n], []byte("�")))
-		s := Segment{Sequence: q.next, Start: q.offset, End: q.offset + int64(len(v))}
-		q.offset = s.End
-		q.next++
-		if q.bytes+len(v) > WorkerBuffer {
-			s.Gap = &Gap{Reason: "worker_buffer_overflow"}
-			if len(q.segments) > 0 && q.segments[len(q.segments)-1].Gap != nil && (!q.peeked || q.segments[len(q.segments)-1].Sequence != q.sealed) {
-				q.segments[len(q.segments)-1].End = s.End
-				q.next--
-				b = b[n:]
-				continue
+		n := min(len(b), queueBlockBytes)
+		// Pipe emits complete UTF-8 characters; preserve those at block boundaries.
+		if n < len(b) {
+			for n > 0 && !utf8.RuneStart(b[n]) {
+				n--
 			}
-		} else {
-			s.End = s.Start + int64(len(v))
-			q.offset = s.End
-			s.Text = &v
-			q.bytes += len(v)
+			if n == 0 {
+				n = min(len(b), queueBlockBytes)
+			}
 		}
-		q.segments = append(q.segments, s)
+		part := bytes.ToValidUTF8(b[:n], []byte("\uFFFD"))
+		q.appendText(part)
 		b = b[n:]
 	}
+}
+func (q *Queue) appendText(b []byte) {
+	for len(b) > 0 {
+		tail := q.tail()
+		if tail == nil || tail.gap || tail.sealed || len(tail.data) == queueBlockBytes {
+			if q.bytes+queueBlockBytes > queuePayloadBytes || q.count >= queueEntries-1 {
+				q.addGap(len(b))
+				return
+			}
+			q.entries[(q.head+q.count)%queueEntries] = queuedSegment{sequence: q.next, start: q.offset, end: q.offset, data: make([]byte, 0, queueBlockBytes)}
+			q.count++
+			q.next++
+			q.bytes += queueBlockBytes
+			tail = q.tail()
+		}
+		n := min(len(b), queueBlockBytes-len(tail.data))
+		if n < len(b) {
+			for n > 0 && !utf8.RuneStart(b[n]) {
+				n--
+			}
+		}
+		if n == 0 {
+			tail.sealed = true
+			continue
+		}
+		tail.data = append(tail.data, b[:n]...)
+		q.offset += int64(n)
+		tail.end = q.offset
+		b = b[n:]
+	}
+}
+func entrySegment(v *queuedSegment) Segment {
+	s := Segment{Sequence: v.sequence, Start: v.start, End: v.end}
+	if v.gap {
+		s.Gap = &Gap{Reason: "worker_buffer_overflow"}
+	} else {
+		text := string(v.data)
+		s.Text = &text
+	}
+	return s
 }
 func (q *Queue) Take() []Segment {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	s := q.segments
-	q.segments = nil
-	q.bytes = 0
-	return s
+	out := make([]Segment, 0, q.count)
+	for q.count > 0 {
+		out = append(out, entrySegment(&q.entries[q.head]))
+		q.removeHead()
+	}
+	return out
+}
+func (q *Queue) removeHead() {
+	v := &q.entries[q.head]
+	q.bytes -= cap(v.data)
+	*v = queuedSegment{}
+	q.head = (q.head + 1) % queueEntries
+	q.count--
 }
 
 type Cursor struct {
@@ -309,28 +390,24 @@ func (s Segment) Validate() error {
 	return nil
 }
 
-// Peek/Acknowledge keep unacknowledged custody in the bounded queue. Peeking
-// seals a trailing gap so concurrent draining cannot extend an in-flight record.
+// Peek seals the exact in-flight segment. Concurrent appends cannot alter its
+// bytes or gap range, so response-loss retries retain the same custody identity.
 func (q *Queue) Peek() (Segment, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if len(q.segments) == 0 {
+	if q.count == 0 {
 		return Segment{}, false
 	}
-	q.sealed = q.segments[0].Sequence
-	q.peeked = true
-	return q.segments[0], true
+	q.entries[q.head].sealed = true
+	return entrySegment(&q.entries[q.head]), true
 }
 func (q *Queue) Acknowledge(sequence int64) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if len(q.segments) == 0 || q.segments[0].Sequence != sequence {
+	if q.count == 0 || q.entries[q.head].sequence != sequence {
 		return ErrInvalid
 	}
-	if q.segments[0].Text != nil {
-		q.bytes -= len(*q.segments[0].Text)
-	}
-	q.segments = q.segments[1:]
+	q.removeHead()
 	return nil
 }
 

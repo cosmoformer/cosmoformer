@@ -60,7 +60,18 @@ func (a *Agent) evidenceRequest(ctx context.Context, method, path string, body [
 	}
 	defer res.Body.Close()
 	raw, e := io.ReadAll(io.LimitReader(res.Body, 1048577))
-	if e != nil || len(raw) > 1048576 || res.StatusCode != 200 {
+	if e != nil || len(raw) > 1048576 {
+		return ErrAgent
+	}
+	if method == "PUT" && res.StatusCode == http.StatusConflict {
+		var problem struct {
+			Code string `json:"code"`
+		}
+		if json.Unmarshal(raw, &problem) == nil && problem.Code == "UPLOAD_INCOMPLETE" {
+			return evidence.ErrUploadIncomplete
+		}
+	}
+	if res.StatusCode != 200 {
 		return ErrAgent
 	}
 	if method == "PUT" {

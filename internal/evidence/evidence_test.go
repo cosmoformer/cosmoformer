@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -268,5 +269,74 @@ func TestUTF8Bounds(t *testing.T) {
 	q.Append(bytes.Repeat([]byte{255}, WorkerBuffer))
 	if q.bytes > WorkerBuffer {
 		t.Fatal("invalid UTF8 exceeded buffer cap")
+	}
+}
+
+func TestRedactorPreservesUnicodeAtEveryReadBoundary(t *testing.T) {
+	text := "before € 😀 中 after"
+	for split := 0; split <= len(text); split++ {
+		r := &Registry{}
+		if e := r.Register("xx"); e != nil {
+			t.Fatal(e)
+		}
+		p := r.Pipe()
+		q := &Queue{}
+		q.Append(p.Feed([]byte(text[:split]), false))
+		q.Append(p.Feed([]byte(text[split:]), false))
+		q.Append(p.Feed(nil, true))
+		var got strings.Builder
+		for _, s := range q.Take() {
+			if s.Validate() != nil || s.Text == nil {
+				t.Fatal("invalid segment", s)
+			}
+			got.WriteString(*s.Text)
+		}
+		if got.String() != text {
+			t.Fatalf("split %d: %q", split, got.String())
+		}
+	}
+}
+func TestQueueCoalescesFragmentedReadsWithinMemoryBudget(t *testing.T) {
+	q := &Queue{}
+	for i := 0; i < 200000; i++ {
+		q.Append([]byte("a"))
+	}
+	if q.count != 4 {
+		t.Fatalf("fragmented reads created %d segments", q.count)
+	}
+	if retained := uintptr(q.bytes) + unsafe.Sizeof(*q); retained > WorkerBuffer {
+		t.Fatalf("retained %d bytes", retained)
+	}
+	s, _ := q.Peek()
+	sealed := *s.Text
+	q.Append([]byte("later"))
+	again, _ := q.Peek()
+	if *again.Text != sealed {
+		t.Fatal("in-flight bytes changed")
+	}
+	var end int64
+	for _, s := range q.Take() {
+		if s.Start != end || s.Validate() != nil {
+			t.Fatal("bad archive range", s)
+		}
+		end = s.End
+	}
+	if end != 200005 {
+		t.Fatal("lost bytes", end)
+	}
+}
+func TestQueuePreservesUnicodeAtSegmentBoundary(t *testing.T) {
+	text := strings.Repeat("a", queueBlockBytes-1) + "€😀"
+	q := &Queue{}
+	q.Append([]byte(text))
+	var got strings.Builder
+	for _, s := range q.Take() {
+		if s.Validate() != nil {
+			t.Fatal("invalid Unicode segment")
+		}
+		got.WriteString(*s.Text)
+	}
+	if got.String() != text {
+		t.Fatal("Unicode split across segment boundary")
 	}
 }

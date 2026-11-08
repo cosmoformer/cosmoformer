@@ -93,7 +93,10 @@ func (c *Custody) Upload(ctx context.Context, tx Transaction, attempt, upload, k
 			if a.Attempt != attempt || a.Kind != kind || a.Hash != hash || a.Size != size {
 				return store.ErrConflict
 			}
-			if a.Version == "" || a.State != "finalized" && a.State != "uploading" {
+			if a.State == "uploading" && a.Version == "" {
+				return ErrUploadIncomplete
+			}
+			if a.State != "finalized" && a.State != "uploading" {
 				return store.ErrConflict
 			}
 			return nil

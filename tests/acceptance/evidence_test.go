@@ -8,6 +8,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"github.com/cosmoformer/cosmoformer/internal/worker"
 	"io"
 	"net/http"
 	"strconv"
@@ -21,8 +23,9 @@ import (
 )
 
 type evidenceStorage struct {
-	mu      sync.Mutex
-	objects map[string]string
+	mu       sync.Mutex
+	objects  map[string]string
+	failOnce bool
 }
 
 func (s *evidenceStorage) Check(context.Context) error { return nil }
@@ -31,6 +34,10 @@ func (s *evidenceStorage) Put(_ context.Context, k string, r io.Reader, _ int64)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.objects[k] = string(b)
+	if s.failOnce {
+		s.failOnce = false
+		return "", evidence.ErrUnavailable
+	}
 	return "retained", e
 }
 func (s *evidenceStorage) Get(_ context.Context, k, v string) (evidence.Object, error) {
@@ -200,5 +207,46 @@ func TestLogCompletionReceiptsAndPositiveClose(t *testing.T) {
 				t.Fatal("missing unknown gap", batch)
 			}
 		})
+	}
+}
+
+func TestLogFlushRecoversIncompleteCustody(t *testing.T) {
+	f := newPreflightFixture(t)
+	ctx := context.Background()
+	if e := f.agent.Admit(ctx); e != nil {
+		t.Fatal(e)
+	}
+	raw := f.workerCall(t, "/poll", runs.Poll{Identity: f.agent.Identity, RequestID: runs.ID(), Wait: 20}, 200)
+	var p struct {
+		Assignment *runs.Assignment `json:"assignment"`
+	}
+	if json.Unmarshal(raw, &p) != nil || p.Assignment == nil {
+		t.Fatal("missing assignment")
+	}
+	f.storage.mu.Lock()
+	f.storage.failOnce = true
+	f.storage.mu.Unlock()
+	f.agent.HTTP.Transport = f.wire.base
+	capture := worker.NewLogCapture(&evidence.Registry{})
+	capture.Queue.Append([]byte("first"))
+	if capture.Flush(ctx, f.agent, p.Assignment.AttemptID) == nil {
+		t.Fatal("synthetic storage failure accepted")
+	}
+	capture.Queue.Append([]byte("second"))
+	if e := capture.Flush(ctx, f.agent, p.Assignment.AttemptID); !errors.Is(e, evidence.ErrUploadIncomplete) {
+		t.Fatal("incomplete receipt not distinguished", e)
+	}
+	if e := capture.Flush(ctx, f.agent, p.Assignment.AttemptID); e != nil {
+		t.Fatal("fresh upload did not recover", e)
+	}
+	var finalized, orphans, segments, holds int
+	if e := f.db.Owner.QueryRow(ctx, `SELECT count(*) FILTER(WHERE state='finalized'),count(*) FILTER(WHERE state='uploading' AND version_id IS NULL) FROM cosmoformer.artifacts WHERE attempt_id=$1`, p.Assignment.AttemptID).Scan(&finalized, &orphans); e != nil || finalized != 2 || orphans != 1 {
+		t.Fatal("upload identity or archive replay changed", finalized, orphans, e)
+	}
+	if e := f.db.Owner.QueryRow(ctx, `SELECT count(*) FROM cosmoformer.log_segments WHERE attempt_id=$1`, p.Assignment.AttemptID).Scan(&segments); e != nil || segments != 2 {
+		t.Fatal("later segments stalled", segments, e)
+	}
+	if e := f.db.Owner.QueryRow(ctx, `SELECT count(*) FROM cosmoformer.artifact_holds WHERE owner_kind='attempt' AND owner_id=$1 AND released_at IS NULL`, p.Assignment.AttemptID).Scan(&holds); e != nil || holds != 3 {
+		t.Fatal("orphan lost custody hold", holds, e)
 	}
 }

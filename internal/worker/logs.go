@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"github.com/cosmoformer/cosmoformer/internal/runs"
 	"io"
 	"sync"
@@ -90,6 +91,9 @@ func (c *LogCapture) Flush(ctx context.Context, a *Agent, attempt string) error 
 			c.upload = runs.ID()
 		}
 		if e := a.ArchiveSegment(ctx, attempt, c.upload, s); e != nil {
+			if errors.Is(e, evidence.ErrUploadIncomplete) {
+				c.upload = ""
+			}
 			return e
 		}
 		if e := c.Queue.Acknowledge(s.Sequence); e != nil {

@@ -25,6 +25,10 @@ const PlanMax int64 = 67108864
 const SegmentMax int64 = 1048576
 const PartSize = 8388608
 
+// ErrUploadIncomplete permits a fresh upload ID only after an exact, matching
+// receipt proves that no recoverable version was retained for this ID.
+var ErrUploadIncomplete = errors.New("upload incomplete; allocate a new upload ID")
+
 var ErrUnavailable = errors.New("evidence unavailable")
 var ErrInvalid = errors.New("invalid evidence input")
 

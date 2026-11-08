@@ -21,6 +21,11 @@ import (
 )
 
 func evidenceError(ctx context.Context, e error) error {
+	if errors.Is(e, evidence.ErrUploadIncomplete) {
+		p := problem(ctx, 409, "Upload has no retained version; retry the same evidence with a new upload ID.")
+		p.Code = "UPLOAD_INCOMPLETE"
+		return p
+	}
 	if errors.Is(e, evidence.ErrInvalid) {
 		return problem(ctx, 422, "Invalid evidence request.")
 	}
@@ -140,7 +145,9 @@ func (a *Server) registerEvidence(api huma.API) {
 		v, e := a.Evidence.Upload(ctx, a.evidenceTx(ctx, bearer(h.Header("Authorization")), id, h.Param("id"), kind), h.Param("id"), h.Param("upload"), kind, h.Header("Expected-SHA256"), size, h.BodyReader())
 		if e != nil {
 			p := evidenceError(ctx, e).(huma.StatusError)
-			huma.WriteErr(api, h, p.GetStatus(), p.Error())
+			h.SetHeader("Content-Type", "application/json")
+			h.SetStatus(p.GetStatus())
+			json.NewEncoder(h.BodyWriter()).Encode(p)
 			return
 		}
 		h.SetHeader("Content-Type", "application/json")
