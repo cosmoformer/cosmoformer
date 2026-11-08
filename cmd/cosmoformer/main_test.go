@@ -50,8 +50,8 @@ func TestCommandArguments(t *testing.T) {
 	}
 	t.Run("migration inventory without database", func(t *testing.T) {
 		output, err := testsupport.Command(t, binary, "migrate", "--list").CombinedOutput()
-		requireExit(t, output, err, 0, "migrations/006_evidence_alignment.sql")
-		if strings.Count(string(output), "migrations/") != 6 {
+		requireExit(t, output, err, 0, "migrations/007_log_completion.sql")
+		if strings.Count(string(output), "migrations/") != 7 {
 			t.Fatal("unexpected embedded migration inventory")
 		}
 	})

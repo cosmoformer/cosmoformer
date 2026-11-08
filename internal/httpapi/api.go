@@ -11,7 +11,9 @@ import (
 	"github.com/cosmoformer/cosmoformer/internal/clock"
 	"github.com/cosmoformer/cosmoformer/internal/coordinator"
 	"github.com/cosmoformer/cosmoformer/internal/cryptostore"
+	"github.com/cosmoformer/cosmoformer/internal/evidence"
 	"github.com/cosmoformer/cosmoformer/internal/identity"
+	"github.com/cosmoformer/cosmoformer/internal/runs"
 	"github.com/cosmoformer/cosmoformer/internal/store"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
@@ -19,6 +21,8 @@ import (
 )
 
 type Server struct {
+	Evidence    *evidence.Custody
+	Previews    *evidence.Previews
 	Store       *store.Store
 	Origin      string
 	Hasher      *identity.Hasher
@@ -33,6 +37,7 @@ func New(s *store.Store, origin string) (http.Handler, huma.API) {
 }
 
 type Options struct {
+	Evidence   *evidence.Custody
 	Clock      clock.Source
 	Bitbucket  *bitbucket.Client
 	Cipher     *cryptostore.Cipher
@@ -47,6 +52,8 @@ func NewWithOptions(s *store.Store, origin string, options Options) (http.Handle
 		options.Bitbucket = bitbucket.New(nil)
 	}
 	server := &Server{Store: s, Origin: origin, Coordinator: coordinator.New(s, options.Clock), Bitbucket: options.Bitbucket, Cipher: options.Cipher}
+	server.Evidence = options.Evidence
+	server.Previews = evidence.NewPreviews(runs.ID)
 	if s != nil {
 		server.Hasher = identity.NewHasher()
 	}
@@ -61,6 +68,7 @@ func NewWithOptions(s *store.Store, origin string, options Options) (http.Handle
 	server.registerConfiguration(api)
 	server.registerPreflights(api)
 	server.registerWorker(api)
+	server.registerEvidence(api)
 	server.registerWebhook(api)
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200); w.Write([]byte("ok\n")) })
 	mux.HandleFunc("GET /health/ready", func(w http.ResponseWriter, r *http.Request) {

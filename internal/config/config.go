@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"github.com/cosmoformer/cosmoformer/internal/evidence"
 	"io"
 	"net"
 	"net/url"
@@ -10,10 +11,14 @@ import (
 	"strings"
 )
 
-type Config struct{ Listen, Origin, DSNFile, UnixSocket string }
+type Config struct {
+	Listen, Origin, DSNFile, UnixSocket string
+	Artifact                            evidence.Settings
+}
 
 func Load() (Config, error) {
 	c := Config{Listen: os.Getenv("COSMOFORMER_LISTEN"), Origin: os.Getenv("COSMOFORMER_ORIGIN"), DSNFile: os.Getenv("COSMOFORMER_DATABASE_DSN_FILE")}
+	c.Artifact = evidence.Settings{Bucket: os.Getenv("COSMOFORMER_ARTIFACT_BUCKET"), Region: os.Getenv("COSMOFORMER_ARTIFACT_REGION"), Owner: os.Getenv("COSMOFORMER_ARTIFACT_EXPECTED_OWNER")}
 	c.UnixSocket = os.Getenv("COSMOFORMER_UNIX_SOCKET")
 	if c.Listen == "" && c.UnixSocket == "" {
 		c.Listen = "127.0.0.1:18080"
@@ -21,6 +26,11 @@ func Load() (Config, error) {
 	return c, c.Validate()
 }
 func (c Config) Validate() error {
+	if c.Artifact != (evidence.Settings{}) {
+		if e := c.Artifact.Validate(); e != nil {
+			return errors.New("invalid artifact storage settings")
+		}
+	}
 	u, e := url.Parse(c.Origin)
 	if e != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" {
 		return errors.New("COSMOFORMER_ORIGIN must be an exact HTTPS origin without a path")

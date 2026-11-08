@@ -48,7 +48,7 @@ func TestMigrationCommand(t *testing.T) {
 	}
 	for i := 0; i < 2; i++ {
 		output, err := operator(t, binary, owner, "migrate").CombinedOutput()
-		requireExit(t, output, err, 0, "Database schema is current (version 6).")
+		requireExit(t, output, err, 0, "Database schema is current (version 7).")
 	}
 	if err := db.App.Ready(ctx); err != nil {
 		t.Fatal("CLI migrations did not provision a usable runtime schema", err)
@@ -56,13 +56,13 @@ func TestMigrationCommand(t *testing.T) {
 	runtime := protectedDSN(t, db.App.Pool.Config().ConnString())
 	output, err := operator(t, binary, runtime, "migrate").CombinedOutput()
 	requireExit(t, output, err, 1, "operator-provisioned owner/app roles are missing or unsafe")
-	if _, err := db.Owner.Exec(ctx, `UPDATE cosmoformer.schema_version SET version=7`); err != nil {
+	if _, err := db.Owner.Exec(ctx, `UPDATE cosmoformer.schema_version SET version=8`); err != nil {
 		t.Fatal(err)
 	}
 	output, err = operator(t, binary, owner, "migrate").CombinedOutput()
 	requireExit(t, output, err, 1, "FORWARD_ONLY_MIGRATIONS: database is newer than this binary")
 	var version int
-	if err := db.Owner.QueryRow(ctx, `SELECT version FROM cosmoformer.schema_version`).Scan(&version); err != nil || version != 7 {
+	if err := db.Owner.QueryRow(ctx, `SELECT version FROM cosmoformer.schema_version`).Scan(&version); err != nil || version != 8 {
 		t.Fatal("newer schema was modified", err)
 	}
 }

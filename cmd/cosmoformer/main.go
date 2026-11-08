@@ -15,6 +15,7 @@ import (
 
 	"github.com/cosmoformer/cosmoformer/internal/config"
 	"github.com/cosmoformer/cosmoformer/internal/cryptostore"
+	"github.com/cosmoformer/cosmoformer/internal/evidence"
 	"github.com/cosmoformer/cosmoformer/internal/httpapi"
 	"github.com/cosmoformer/cosmoformer/internal/identity"
 	"github.com/cosmoformer/cosmoformer/internal/store"
@@ -126,6 +127,13 @@ func run() error {
 		}
 		defer s.Pool.Close()
 		options := httpapi.Options{Background: ctx}
+		if c.Artifact.Bucket != "" {
+			storage, e := evidence.NewS3(ctx, c.Artifact)
+			if e != nil {
+				return e
+			}
+			options.Evidence = &evidence.Custody{Storage: storage, Bucket: c.Artifact.Bucket}
+		}
 		if keyPath := os.Getenv("COSMOFORMER_ENCRYPTION_KEY_FILE"); keyPath != "" {
 			key, e := config.ReadKey(keyPath)
 			if e != nil {

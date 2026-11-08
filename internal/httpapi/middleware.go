@@ -122,6 +122,9 @@ func (a *Server) middleware(next http.Handler) http.Handler {
 		if strings.HasPrefix(r.URL.Path, "/worker/") || strings.HasPrefix(r.URL.Path, "/webhooks/") {
 			limit = 1048576
 		}
+		if r.Method == "PUT" && strings.HasPrefix(r.URL.Path, "/worker/v1/attempts/") && strings.Contains(r.URL.Path, "/artifacts/") {
+			limit = 67108865
+		}
 		r.Body = http.MaxBytesReader(w, r.Body, limit)
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			public := r.URL.Path == "/api/v1/session/login" || r.URL.Path == "/api/v1/account/setup" || r.URL.Path == "/api/v1/account/reset"

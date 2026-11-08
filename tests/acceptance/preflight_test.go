@@ -21,6 +21,7 @@ import (
 	"github.com/cosmoformer/cosmoformer/internal/catalog"
 	"github.com/cosmoformer/cosmoformer/internal/coordinator"
 	"github.com/cosmoformer/cosmoformer/internal/cryptostore"
+	"github.com/cosmoformer/cosmoformer/internal/evidence"
 	"github.com/cosmoformer/cosmoformer/internal/httpapi"
 	"github.com/cosmoformer/cosmoformer/internal/runs"
 	"github.com/cosmoformer/cosmoformer/internal/testsupport"
@@ -107,7 +108,8 @@ func newPreflightFixture(t *testing.T, requiredTags ...[]string) *preflightFixtu
 	if e != nil {
 		t.Fatal(e)
 	}
-	options := httpapi.Options{Clock: ticks, Cipher: cipher, Bitbucket: bitbucket.New(&http.Client{Transport: remote})}
+	storage := &evidenceStorage{objects: map[string]string{}}
+	options := httpapi.Options{Evidence: &evidence.Custody{Storage: storage, Bucket: "synthetic"}, Clock: ticks, Cipher: cipher, Bitbucket: bitbucket.New(&http.Client{Transport: remote})}
 	db, admin := fixtureOptions(t, options)
 	fp := cipher.Fingerprint()
 	if _, e := db.Owner.Exec(context.Background(), `INSERT INTO cosmoformer.crypto_keys(fingerprint,state) VALUES($1,'active')`, fp[:]); e != nil {
@@ -189,10 +191,11 @@ func newPreflightFixture(t *testing.T, requiredTags ...[]string) *preflightFixtu
 	if _, e := db.Owner.Exec(context.Background(), `SELECT set_config('app.org_id',$1,false)`, org); e != nil {
 		t.Fatal(e)
 	}
-	return &preflightFixture{db: db, admin: admin, agent: &agent, ticks: ticks, org: org, stack: stack, repo: repo, workerID: workerID, token: token, wire: wire, remote: remote}
+	return &preflightFixture{db: db, admin: admin, agent: &agent, ticks: ticks, org: org, stack: stack, repo: repo, workerID: workerID, token: token, wire: wire, remote: remote, storage: storage}
 }
 
 type preflightFixture struct {
+	storage                           *evidenceStorage
 	db                                *testsupport.Database
 	admin                             *client
 	agent                             *worker.Agent
