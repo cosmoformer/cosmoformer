@@ -15,7 +15,7 @@ import (
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
-const SchemaVersion int32 = 5
+const SchemaVersion int32 = 6
 
 var ErrForbidden = errors.New("insufficient permission")
 var ErrNotFound = errors.New("not found")
@@ -50,6 +50,13 @@ func (s *Store) Ready(ctx context.Context) error {
 	e := s.Pool.QueryRow(ctx, `SELECT current_user='cosmoformer_app' AND NOT r.rolsuper AND NOT r.rolbypassrls AND NOT r.rolcreaterole AND NOT r.rolcreatedb AND NOT pg_has_role(current_user,'cosmoformer_owner','MEMBER') AND NOT has_schema_privilege(current_user,'cosmoformer','CREATE') AND NOT EXISTS(SELECT FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='cosmoformer' AND c.relowner=r.oid) AND NOT has_table_privilege(current_user,'cosmoformer.accounts','SELECT') AND has_function_privilege(current_user,'cosmoformer.session_identity(bytea)','EXECUTE') FROM pg_roles r WHERE rolname=current_user`).Scan(&safe)
 	if e != nil || !safe {
 		return errors.New("database runtime role has incompatible privileges")
+	}
+	if e = s.Pool.QueryRow(ctx, `SELECT
+ NOT has_table_privilege(current_user,'cosmoformer.backup_sets','SELECT,INSERT,UPDATE,DELETE')
+ AND (SELECT count(*)=3 FROM pg_class WHERE oid IN ('cosmoformer.artifacts'::regclass,'cosmoformer.artifact_holds'::regclass,'cosmoformer.cleanup_claims'::regclass) AND relrowsecurity AND relforcerowsecurity)
+ AND EXISTS(SELECT FROM pg_constraint WHERE conrelid='cosmoformer.artifacts'::regclass AND conname='artifacts_finalized_identity' AND convalidated)
+ AND (SELECT count(*)=3 FROM pg_trigger WHERE tgrelid IN ('cosmoformer.artifacts'::regclass,'cosmoformer.artifact_holds'::regclass,'cosmoformer.cleanup_claims'::regclass) AND tgname IN ('artifacts_integrity','artifact_holds_integrity','cleanup_claims_integrity') AND tgenabled='O')`).Scan(&safe); e != nil || !safe {
+		return errors.New("database evidence schema has incompatible protections")
 	}
 	return nil
 }
