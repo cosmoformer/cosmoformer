@@ -130,7 +130,7 @@ Coverage includes all application TypeScript/React files, including unvisited fi
 Serving never migrates implicitly. The runtime uses `COSMOFORMER_DATABASE_DSN_FILE`; migration/bootstrap/recovery commands use the separate `COSMOFORMER_MIGRATION_DSN_FILE`. Input files must be regular, owner-readable only. The development setup provisions distinct owner and restricted runtime database roles.
 
 ```sh
-# List the five embedded forward-only migrations without a database connection:
+# List the six embedded forward-only migrations without a database connection:
 .build/tools/go/bin/go run ./cmd/cosmoformer migrate --list
 
 # Recover an existing enabled installation administrator on this local DB:
