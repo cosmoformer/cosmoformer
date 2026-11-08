@@ -24,6 +24,7 @@ import (
 
 	"github.com/cosmoformer/cosmoformer/internal/catalog"
 	"github.com/cosmoformer/cosmoformer/internal/clock"
+	"github.com/cosmoformer/cosmoformer/internal/evidence"
 	"github.com/cosmoformer/cosmoformer/internal/runs"
 	"github.com/cosmoformer/cosmoformer/internal/source"
 )
@@ -94,6 +95,7 @@ type Agent struct {
 	Git                       source.Git
 	mu                        sync.Mutex
 	terms                     []string
+	redactor                  *evidence.Registry
 }
 
 func (a *Agent) call(ctx context.Context, path string, in, out any) error {
@@ -268,8 +270,9 @@ func (a *Agent) RunOne(ctx context.Context) error {
 	}()
 	a.mu.Lock()
 	a.terms = nil
+	a.redactor = &evidence.Registry{}
 	a.mu.Unlock()
-	defer func() { a.mu.Lock(); a.terms = nil; a.mu.Unlock() }()
+	defer func() { a.mu.Lock(); a.terms = nil; a.redactor = nil; a.mu.Unlock() }()
 	repositories := map[string]string{assignment.Source.URL: assignment.Source.RepositoryID}
 	credentialContext, stopHelper, e := a.serveCredentials(ctx, dir, *assignment, repositories)
 	if e != nil {
@@ -538,6 +541,18 @@ func (a *Agent) register(values ...string) bool {
 		total += len(v)
 	}
 	if len(terms) > 4096 || total > 262144 {
+		return false
+	}
+	if a.redactor == nil {
+		a.redactor = &evidence.Registry{}
+	}
+	nonempty := []string{}
+	for _, v := range values {
+		if v != "" {
+			nonempty = append(nonempty, v)
+		}
+	}
+	if a.redactor.Register(nonempty...) != nil {
 		return false
 	}
 	a.terms = terms

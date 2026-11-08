@@ -151,12 +151,19 @@ type Prepare struct {
 	Reaped        bool            `json:"source_processes_reaped"`
 	EverPermitted bool            `json:"ever_permitted"`
 }
+type LogFinal struct {
+	Stream       string `json:"stream"`
+	LastSequence int64  `json:"last_sequence"`
+	Complete     bool   `json:"complete"`
+	Unknown      bool   `json:"unknown_loss"`
+}
 type Result struct {
-	Reason       string `json:"reason,omitempty"`
-	Outcome      string `json:"outcome"`
-	Digest       string `json:"preflight_digest"`
-	NoStateChild bool   `json:"no_state_child_created"`
-	Reaped       bool   `json:"source_processes_reaped"`
+	LogFinal     *LogFinal `json:"log_final,omitempty"`
+	Reason       string    `json:"reason,omitempty"`
+	Outcome      string    `json:"outcome"`
+	Digest       string    `json:"preflight_digest"`
+	NoStateChild bool      `json:"no_state_child_created"`
+	Reaped       bool      `json:"source_processes_reaped"`
 }
 type Transition struct {
 	Accepted           bool   `json:"accepted"`

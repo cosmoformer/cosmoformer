@@ -15,7 +15,7 @@ import (
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
-const SchemaVersion int32 = 6
+const SchemaVersion int32 = 7
 
 var ErrForbidden = errors.New("insufficient permission")
 var ErrNotFound = errors.New("not found")

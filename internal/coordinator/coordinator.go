@@ -614,6 +614,33 @@ func (c *Coordinator) Transition(ctx context.Context, token, route string, m run
 			if _, e = tx.Exec(ctx, `UPDATE cosmoformer.attempts SET state='terminal',outcome=$2,closed_at=clock_timestamp(),stop_proof=$3,revision=revision+1 WHERE id=$1`, m.AttemptID, outcome, mustJSON(p)); e != nil {
 				return e
 			}
+			if p.LogFinal != nil {
+				f := *p.LogFinal
+				if f.Stream != "console" || f.LastSequence < -1 || f.LastSequence > 9007199254740991 || f.Complete && f.Unknown {
+					return runs.Fail("INVALID_REQUEST")
+				}
+				var last int64
+				var gaps bool
+				if e = tx.QueryRow(ctx, `SELECT coalesce(max(sequence),-1),coalesce(bool_or(gap),false) FROM cosmoformer.log_segments WHERE attempt_id=$1 AND stream='console'`, m.AttemptID).Scan(&last, &gaps); e != nil {
+					return e
+				}
+				if f.LastSequence != last || f.Complete && gaps {
+					return runs.Fail("INVALID_REQUEST")
+				}
+			}
+			if p.LogFinal == nil || p.LogFinal.Unknown {
+				if _, e = tx.Exec(ctx, `INSERT INTO cosmoformer.log_segments(org_id,attempt_id,stream,sequence,first_offset,last_offset,gap,gap_reason,unknown_extent) SELECT org_id,id,'console',coalesce((SELECT max(sequence)+1 FROM cosmoformer.log_segments WHERE attempt_id=$1),0),coalesce((SELECT max(last_offset) FROM cosmoformer.log_segments WHERE attempt_id=$1),0),coalesce((SELECT max(last_offset) FROM cosmoformer.log_segments WHERE attempt_id=$1),0),true,'worker_final_unknown',true FROM cosmoformer.attempts WHERE id=$1`, m.AttemptID); e != nil {
+					return e
+				}
+			}
+			if p.LogFinal != nil {
+				if _, e = tx.Exec(ctx, `UPDATE cosmoformer.attempts SET log_final=$2 WHERE id=$1`, m.AttemptID, mustJSON(p.LogFinal)); e != nil {
+					return e
+				}
+			}
+			if _, e = tx.Exec(ctx, `UPDATE cosmoformer.artifact_holds SET released_at=clock_timestamp() WHERE owner_kind='attempt' AND owner_id=$1 AND released_at IS NULL`, m.AttemptID); e != nil {
+				return e
+			}
 			if _, e = tx.Exec(ctx, `DELETE FROM cosmoformer.worker_reservations WHERE worker_id=$1 AND attempt_id=$2 AND generation=$3 AND agent_instance=$4`, w.ID, m.AttemptID, m.Generation, m.Agent); e != nil {
 				return e
 			}
@@ -798,4 +825,27 @@ func Spec(e runs.Effective, revision, repo, url, commit, subject string, facts i
 		}
 	}
 	return runs.PreflightSpec{Version: 1, Phase: "preflight", StackRevisionID: revision, Source: runs.Source{RepositoryID: repo, URL: url, Commit: commit, Root: s.Root, SubjectID: subject, FactsRevision: facts}, Engine: e.Runtime, Workspace: s.Workspace, BackendOwnerAccountID: s.BackendOwnerAccountID, VarFiles: s.VarFiles, BackendFiles: s.BackendFiles, Pool: runs.Pool{ID: s.Worker.ID, Tags: s.Worker.Tags, GrantRevision: poolRev}, Secrets: e.Secrets, SourceCredentials: e.Credentials, Grants: e.Grants, Review: runs.ReviewPolicy{Minimum: s.Approvals.Minimum, Revision: 1, AllowPRApply: s.AllowPRApply}, RuleVersion: "none", ProfileID: "source-only-v1", AWS: e.AWS}
+}
+
+// WithEvidenceAttempt accepts custody/log reports from the exact still-reserved
+// process even after a deadline, pause, or authority revocation. Reporting does
+// not grant permission to start a command or renew any lease.
+func (c *Coordinator) WithEvidenceAttempt(ctx context.Context, token string, id runs.Identity, attempt string, fn func(pgx.Tx, Worker, runs.Assignment) error) error {
+	return c.workerTx(ctx, token, func(tx pgx.Tx, w Worker) error {
+		if e := c.current(ctx, tx, w, id, false); e != nil {
+			return e
+		}
+		var valid bool
+		if e := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM cosmoformer.attempts a JOIN cosmoformer.worker_reservations r ON r.attempt_id=a.id AND r.worker_id=a.worker_id AND r.generation=a.generation AND r.agent_instance=a.agent_instance WHERE a.id=$1 AND a.worker_id=$2 AND a.generation=$3 AND a.agent_instance=$4 AND a.closed_at IS NULL)`, attempt, w.ID, id.Generation, id.Agent).Scan(&valid); e != nil {
+			return e
+		}
+		if !valid {
+			return store.ErrForbidden
+		}
+		a, e := c.assignment(ctx, tx, attempt)
+		if e != nil {
+			return e
+		}
+		return fn(tx, w, *a)
+	})
 }

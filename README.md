@@ -4,6 +4,10 @@ Cosmoformer is an early-stage, open-source infrastructure automation project. Th
 
 You can create local accounts, sign in, manage organizations and teams, and assign project/environment access. New accounts have no access. Administration, deployment, approval and raw-evidence permissions are separate. Source preflight adds bounded Bitbucket source reads, strict Git configuration, registered Linux workers and permanent state-destination ownership checks. It does not initialize a backend, read existing state, assume AWS roles, plan or apply infrastructure. There is no production release.
 
+Evidence storage and redacted logging are available as bounded backend/worker capabilities. Artifact custody uses the platform EC2 role, a private versioned S3 bucket with SSE-S3, immutable upload receipts, and verified exact-version reads. Logs retain ordered segments or explicit loss gaps; previews are volatile and cannot prove completion. Browser evidence reads enforce current scope grants, with a separate raw-evidence grant. Native planning, execution, Apply and recovery workflows remain unavailable.
+
+This milestone builds on schema alignment reviewed at `2cb1c94` and merged into `main` as `0eda065` (PR #4). The feature branch is rebased onto that updated `main`.
+
 ## Local development
 
 Requires Docker Desktop (running), Make, OpenSSL and Node to bootstrap tools. Use Go **1.27.3**, Node **26.13.0**, and the checksum-pinned PostgreSQL **18.6** image. Nothing installs into global tool directories.
