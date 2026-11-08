@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "architecture": "linux_amd64",
+  "verified_on": "2026-11-06",
+  "go_image": "golang:1.27.3-trixie@sha256:af1bfc2614ebb1dbd31af514b78740fd678850e76498762b425ecee4c5c6ea80",
+  "runtime_image": "debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2",
+  "debian_snapshot": "20261105T000000Z",
+  "git_package_version": "1:2.47.3-0+deb13u1",
+  "git_version": "git version 2.47.3",
+  "runtimes": [
+    {
+      "engine": "opentofu",
+      "version": "1.13.8",
+      "url": "https://github.com/opentofu/opentofu/releases/download/v1.13.8/tofu_1.13.8_linux_amd64.zip",
+      "checksum_source": "https://github.com/opentofu/opentofu/releases/download/v1.13.8/tofu_1.13.8_SHA256SUMS",
+      "archive_sha256": "aa4382a5eefcf026309d07398ea803f97b9218a17d940999a938be22bfe9d73f",
+      "arch": "linux_amd64",
+      "base_image_ref": "debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2",
+      "git_package_version": "1:2.47.3-0+deb13u1",
+      "engine_archive": {
+        "url": "https://github.com/opentofu/opentofu/releases/download/v1.13.8/tofu_1.13.8_linux_amd64.zip",
+        "sha256": "aa4382a5eefcf026309d07398ea803f97b9218a17d940999a938be22bfe9d73f",
+        "member": "tofu"
+      },
+      "test_provider_packages": [
+        {
+          "source_addresses": [
+            "registry.opentofu.org/hashicorp/null"
+          ],
+          "version": "3.2.4",
+          "arch": "linux_amd64",
+          "archive_url": "https://releases.hashicorp.com/terraform-provider-null/3.2.4/terraform-provider-null_3.2.4_linux_amd64.zip",
+          "sha256": "9d32ac3619cfc93eb3c4f423492a8e0f79db05fec58e449dee9b2d5873d5f69f",
+          "member": "terraform-provider-null_v3.2.4_x5"
+        },
+        {
+          "source_addresses": [
+            "registry.opentofu.org/hashicorp/aws"
+          ],
+          "version": "6.41.0",
+          "arch": "linux_amd64",
+          "archive_url": "https://releases.hashicorp.com/terraform-provider-aws/6.41.0/terraform-provider-aws_6.41.0_linux_amd64.zip",
+          "sha256": "4e8de5f3fcc3e3f41b6703ad4c0fa62175d0c29afcf56ac82eb16c604bb6dafa",
+          "member": "terraform-provider-aws_v6.41.0_x5"
+        }
+      ]
+    },
+    {
+      "engine": "terraform",
+      "version": "1.17.1",
+      "url": "https://releases.hashicorp.com/terraform/1.17.1/terraform_1.17.1_linux_amd64.zip",
+      "checksum_source": "https://releases.hashicorp.com/terraform/1.17.1/terraform_1.17.1_SHA256SUMS",
+      "archive_sha256": "4638628058e71a55212b1c563712eac03b902128f40740f3dc8174df12135061",
+      "arch": "linux_amd64",
+      "base_image_ref": "debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2",
+      "git_package_version": "1:2.47.3-0+deb13u1",
+      "engine_archive": {
+        "url": "https://releases.hashicorp.com/terraform/1.17.1/terraform_1.17.1_linux_amd64.zip",
+        "sha256": "4638628058e71a55212b1c563712eac03b902128f40740f3dc8174df12135061",
+        "member": "terraform"
+      },
+      "test_provider_packages": [
+        {
+          "source_addresses": [
+            "registry.terraform.io/hashicorp/null"
+          ],
+          "version": "3.2.4",
+          "arch": "linux_amd64",
+          "archive_url": "https://releases.hashicorp.com/terraform-provider-null/3.2.4/terraform-provider-null_3.2.4_linux_amd64.zip",
+          "sha256": "9d32ac3619cfc93eb3c4f423492a8e0f79db05fec58e449dee9b2d5873d5f69f",
+          "member": "terraform-provider-null_v3.2.4_x5"
+        },
+        {
+          "source_addresses": [
+            "registry.terraform.io/hashicorp/aws"
+          ],
+          "version": "6.41.0",
+          "arch": "linux_amd64",
+          "archive_url": "https://releases.hashicorp.com/terraform-provider-aws/6.41.0/terraform-provider-aws_6.41.0_linux_amd64.zip",
+          "sha256": "4e8de5f3fcc3e3f41b6703ad4c0fa62175d0c29afcf56ac82eb16c604bb6dafa",
+          "member": "terraform-provider-aws_v6.41.0_x5"
+        }
+      ]
+    }
+  ],
+  "scope": "Pinned source runtime and isolated synthetic native-test fixture supply. Native tests do not enable platform execution or establish company compatibility. Each final image digest must match administrator enrollment."
+}

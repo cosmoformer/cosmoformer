@@ -11,11 +11,11 @@ import (
 )
 
 type OrgPath struct {
-	Org string `path:"org" format:"uuid"`
+	Org string `path:"org" format:"uuid" pattern:"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" doc:"Lowercase hyphenated organization UUID."`
 }
 type OrgIDPath struct {
 	OrgPath
-	ID string `path:"id" format:"uuid"`
+	ID string `path:"id" format:"uuid" pattern:"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" doc:"Lowercase hyphenated resource UUID."`
 }
 type AccountPath struct {
 	ID string `path:"id" format:"uuid"`

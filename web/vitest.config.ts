@@ -12,11 +12,15 @@ export default defineConfig({
         restoreMocks: true,
         coverage: {
             provider: 'v8',
-            include: ['app/**/*.{ts,tsx}'],
+            include: ['app/**/*.{ts,tsx}', '../scripts/dev.mjs', '../scripts/tools.mjs'],
+            allowExternal: true,
             exclude: ['app/.generated/**'],
             reportsDirectory: '../.build/coverage/web',
             reporter: ['text', 'html', ['lcov', { projectRoot: path.resolve(import.meta.dirname, '..') }], 'json-summary'],
-            thresholds: { statements: 90, branches: 85, functions: 90, lines: 90 },
+            thresholds: {
+                statements: 90, branches: 85, functions: 90, lines: 90,
+                'app/**/*.{ts,tsx}': { statements: 90, branches: 85, functions: 90, lines: 90 },
+            },
         },
     },
 });

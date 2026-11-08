@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"sync"
 )
 
 // Envelope is reserved for managed-secret storage; local account verifiers are
@@ -22,6 +23,30 @@ func AAD(org, record, purpose string, revision uint64) []byte {
 type Cipher struct {
 	aead        cipher.AEAD
 	fingerprint [32]byte
+}
+
+func (c *Cipher) Fingerprint() [32]byte { return c.fingerprint }
+
+// Quota consumes a committed block before each encryption; process exit burns
+// every unused slot. There is no unreserved or persistent in-memory fallback.
+type Quota struct {
+	mu          sync.Mutex
+	fingerprint [32]byte
+	remaining   int64
+}
+
+func (q *Quota) Take(f [32]byte, reserve func([32]byte, int64) error) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.remaining == 0 || q.fingerprint != f {
+		if e := reserve(f, 4096); e != nil {
+			return e
+		}
+		q.fingerprint = f
+		q.remaining = 4096
+	}
+	q.remaining--
+	return nil
 }
 
 func New(key []byte) (*Cipher, error) {

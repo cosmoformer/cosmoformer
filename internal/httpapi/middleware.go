@@ -33,17 +33,18 @@ func request(ctx context.Context) requestData {
 }
 
 type Problem struct {
-	Status    int    `json:"status"`
-	Code      string `json:"code"`
-	Message   string `json:"message"`
-	RequestID string `json:"request_id"`
+	Status      int    `json:"status"`
+	Code        string `json:"code"`
+	Message     string `json:"message"`
+	RequestID   string `json:"request_id"`
+	ExpectedSeq int64  `json:"expected_seq,omitempty"`
 }
 
 func (p *Problem) Error() string  { return p.Message }
 func (p *Problem) GetStatus() int { return p.Status }
 func problem(ctx context.Context, status int, message string) *Problem {
 	codes := map[int]string{400: "INVALID_REQUEST", 401: "SIGN_IN_REQUIRED", 403: "FORBIDDEN", 404: "NOT_FOUND", 409: "CONFLICT", 422: "INVALID_INPUT", 429: "TRY_AGAIN", 503: "UNAVAILABLE"}
-	return &Problem{status, codes[status], message, request(ctx).ID}
+	return &Problem{Status: status, Code: codes[status], Message: message, RequestID: request(ctx).ID}
 }
 func init() {
 	huma.NewError = func(status int, message string, errs ...error) huma.StatusError {
@@ -117,7 +118,11 @@ func (a *Server) middleware(next http.Handler) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+		limit := int64(64 * 1024)
+		if strings.HasPrefix(r.URL.Path, "/worker/") || strings.HasPrefix(r.URL.Path, "/webhooks/") {
+			limit = 1048576
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			public := r.URL.Path == "/api/v1/session/login" || r.URL.Path == "/api/v1/account/setup" || r.URL.Path == "/api/v1/account/reset"
 			mutation := r.Method != "GET" && r.Method != "HEAD"
@@ -171,7 +176,14 @@ func (a *Server) middleware(next http.Handler) http.Handler {
 				return
 			}
 			r.Body = io.NopCloser(bytes.NewReader(body))
-			d.Digest = identity.Digest(r.Method + "\x00" + r.URL.Path + "\x00" + string(body))
+			// Secret writes retain only their one-use change identity, never a fast
+			// verifier of the submitted plaintext. Their receipts are metadata only.
+			secretWrite := strings.HasSuffix(r.URL.Path, "/secrets") || strings.Contains(r.URL.Path, "/secrets/") || strings.HasSuffix(r.URL.Path, "/source-credentials") || strings.HasSuffix(r.URL.Path, "/credentials")
+			if secretWrite {
+				d.Digest = identity.Digest(r.Method + "\x00" + r.URL.Path + "\x00" + d.Key)
+			} else {
+				d.Digest = identity.Digest(r.Method + "\x00" + r.URL.Path + "\x00" + string(body))
+			}
 			r = r.WithContext(context.WithValue(r.Context(), requestKey{}, d))
 		}
 		next.ServeHTTP(w, r)

@@ -32,7 +32,7 @@ func TestBrowserGuardsAndContractWithoutDatabase(t *testing.T) {
 	if w.Code != 401 || w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("anonymous bootstrap", w.Code)
 	}
-	if api.OpenAPI().Paths["/api/v1/session/login"].Post == nil || api.OpenAPI().Paths["/worker/v1/poll"] != nil {
+	if api.OpenAPI().Paths["/api/v1/session/login"].Post == nil || api.OpenAPI().Paths["/worker/v1/poll"] == nil {
 		t.Fatal("contract contains missing or unimplemented operations")
 	}
 }

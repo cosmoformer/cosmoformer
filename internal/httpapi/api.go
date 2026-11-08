@@ -7,6 +7,10 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/cosmoformer/cosmoformer/internal/bitbucket"
+	"github.com/cosmoformer/cosmoformer/internal/clock"
+	"github.com/cosmoformer/cosmoformer/internal/coordinator"
+	"github.com/cosmoformer/cosmoformer/internal/cryptostore"
 	"github.com/cosmoformer/cosmoformer/internal/identity"
 	"github.com/cosmoformer/cosmoformer/internal/store"
 	"github.com/danielgtaylor/huma/v2"
@@ -15,13 +19,34 @@ import (
 )
 
 type Server struct {
-	Store  *store.Store
-	Origin string
-	Hasher *identity.Hasher
+	Store       *store.Store
+	Origin      string
+	Hasher      *identity.Hasher
+	Coordinator *coordinator.Coordinator
+	Bitbucket   *bitbucket.Client
+	Cipher      *cryptostore.Cipher
+	Quota       cryptostore.Quota
 }
 
 func New(s *store.Store, origin string) (http.Handler, huma.API) {
-	server := &Server{Store: s, Origin: origin}
+	return NewWithOptions(s, origin, Options{})
+}
+
+type Options struct {
+	Clock      clock.Source
+	Bitbucket  *bitbucket.Client
+	Cipher     *cryptostore.Cipher
+	Background context.Context
+}
+
+func NewWithOptions(s *store.Store, origin string, options Options) (http.Handler, huma.API) {
+	if options.Clock == nil {
+		options.Clock = clock.New()
+	}
+	if options.Bitbucket == nil {
+		options.Bitbucket = bitbucket.New(nil)
+	}
+	server := &Server{Store: s, Origin: origin, Coordinator: coordinator.New(s, options.Clock), Bitbucket: options.Bitbucket, Cipher: options.Cipher}
 	if s != nil {
 		server.Hasher = identity.NewHasher()
 	}
@@ -33,6 +58,10 @@ func New(s *store.Store, origin string) (http.Handler, huma.API) {
 	api := humago.New(mux, cfg)
 	server.registerBrowser(api)
 	server.registerAdmin(api)
+	server.registerConfiguration(api)
+	server.registerPreflights(api)
+	server.registerWorker(api)
+	server.registerWebhook(api)
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200); w.Write([]byte("ok\n")) })
 	mux.HandleFunc("GET /health/ready", func(w http.ResponseWriter, r *http.Request) {
 		if s == nil || s.Ready(r.Context()) != nil {
@@ -41,12 +70,19 @@ func New(s *store.Store, origin string) (http.Handler, huma.API) {
 		}
 		w.Write([]byte("ok\n"))
 	})
+	if options.Background != nil && s != nil {
+		go server.sourceJobs(options.Background)
+	}
 	return server.middleware(mux), api
 }
 func register[I, O any](api huma.API, method, path, id string, fn func(context.Context, *I) (*O, error)) {
 	huma.Register(api, huma.Operation{OperationID: id, Method: method, Path: "/api/v1" + path, MaxBodyBytes: 64 * 1024, Errors: []int{401, 403, 404, 409, 422, 429, 503}}, fn)
 }
 func fail(ctx context.Context, e error) error {
+	var p *Problem
+	if errors.As(e, &p) {
+		return p
+	}
 	switch {
 	case errors.Is(e, store.ErrUnauthenticated):
 		return problem(ctx, 401, "Sign in to continue.")
@@ -85,6 +121,35 @@ type IDResult struct {
 
 func idResult(id string) *IDResult { o := &IDResult{}; o.Body.ID = id; return o }
 
+// Call only after current authorization. Source actions use this before external
+// reads, and mutate checks again atomically before creating any new effects.
+func browserReceipt[O any](ctx context.Context, tx pgx.Tx, actor store.Actor) (*O, bool, error) {
+	d := request(ctx)
+	type receipt struct {
+		Digest string          `json:"digest"`
+		Result json.RawMessage `json:"result"`
+		Once   bool            `json:"once_visible"`
+	}
+	old, e := store.JSON[receipt](ctx, tx, `SELECT cosmoformer.browser_request($1,$2)`, actor.ID, d.Key)
+	if errors.Is(e, store.ErrNotFound) {
+		return nil, false, nil
+	}
+	if e != nil {
+		return nil, false, e
+	}
+	if old.Once {
+		p := problem(ctx, 409, "Query current metadata and explicitly confirm a new secret write.")
+		p.Code = "RECONFIRM_SECRET_WRITE"
+		return nil, true, p
+	}
+	if old.Digest != hex.EncodeToString(d.Digest) {
+		return nil, true, store.ErrConflict
+	}
+	var out *O
+	e = json.Unmarshal(old.Result, &out)
+	return out, true, e
+}
+
 func mutate[O any](a *Server, ctx context.Context, org string, once bool, authorize func(pgx.Tx, store.Actor) error, fn func(pgx.Tx, store.Actor) (*O, error)) (*O, error) {
 	var out *O
 	d := request(ctx)
@@ -92,19 +157,10 @@ func mutate[O any](a *Server, ctx context.Context, org string, once bool, author
 		if e := authorize(tx, actor); e != nil {
 			return e
 		}
-		type receipt struct {
-			Digest string          `json:"digest"`
-			Result json.RawMessage `json:"result"`
-			Once   bool            `json:"once_visible"`
-		}
-		old, e := store.JSON[receipt](ctx, tx, `SELECT cosmoformer.browser_request($1,$2)`, actor.ID, d.Key)
-		if e == nil {
-			if old.Digest != hex.EncodeToString(d.Digest) || old.Once {
-				return store.ErrConflict
-			}
-			return json.Unmarshal(old.Result, &out)
-		}
-		if !errors.Is(e, store.ErrNotFound) {
+		var found bool
+		var e error
+		out, found, e = browserReceipt[O](ctx, tx, actor)
+		if found || e != nil {
 			return e
 		}
 		out, e = fn(tx, actor)

@@ -4,7 +4,7 @@ const credentials = () => JSON.parse(readFileSync(new URL('../../.build/testdb/b
     username: string;
     password: string;
 };
-test('account setup, empty access and current team grants', async ({ page, browser }, testInfo) => {
+test('accounts, scoped access and source-worker enrollment', async ({ page, browser }, testInfo) => {
     const pageErrors: string[] = [];
     page.on('pageerror', error => pageErrors.push(error.message));
     const admin = credentials();
@@ -80,6 +80,38 @@ test('account setup, empty access and current team grants', async ({ page, brows
     await expect(page.getByRole('status').filter({ hasText: 'Access revoked' })).toBeVisible();
     await engineer.reload();
     await expect(engineer.getByRole('heading', { name: 'No projects assigned yet' })).toBeVisible();
+    // Phase-2 administration stays local: create a pool and a paused worker,
+    // reveal its credential once, then leave the page without retaining it.
+    await page.getByRole('button', { name: 'Sources & workers', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Configured resources', exact: true })).toBeVisible();
+    const poolName = 'Local source pool ' + suffix;
+    const pool = page.getByRole('heading', { name: 'Add a worker pool', exact: true }).locator('..');
+    await pool.getByLabel('Pool name', { exact: true }).fill(poolName);
+    await pool.getByRole('button', { name: 'Add pool', exact: true }).click();
+    await expect(page.locator('.row strong').filter({ hasText: poolName })).toBeVisible();
+    const worker = page.getByRole('heading', { name: 'Enroll a worker', exact: true }).locator('..');
+    await worker.getByLabel('Worker name', { exact: true }).fill('Source worker ' + suffix);
+    await worker.getByLabel('Pool', { exact: true }).selectOption({ label: poolName });
+    await worker.getByRole('button', { name: 'Enroll worker', exact: true }).click();
+    await expect(page.getByLabel('Worker credential', { exact: true })).toHaveValue(/"worker_id"/);
+    // Leave while the credential is still visible: dismissing it first would
+    // conceal broken cleanup when navigating between the two settings views.
+    await page.getByRole('button', { name: 'Source checks', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Source checks', level: 1 })).toBeVisible();
+    await expect(page.getByLabel('Worker credential', { exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Sources & workers', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Configured resources', exact: true })).toBeVisible();
+    await expect(page.getByLabel('Worker credential', { exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Replace credential', exact: true }).click();
+    await expect(page.getByLabel('Worker credential', { exact: true })).toHaveValue(/"worker_id"/);
+    await page.getByRole('button', { name: 'Dismiss credential', exact: true }).click();
+    await expect(page.getByLabel('Worker credential', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Resume', exact: true })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath('source-settings.png'), fullPage: true });
+    await page.getByRole('button', { name: 'Source checks', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Source checks', level: 1 })).toBeVisible();
+    await expect(page.getByText('No source checks yet.', { exact: true })).toBeVisible();
+    await expect(page.getByLabel('Worker credential', { exact: true })).toHaveCount(0);
     // Sign-out clears protected contents, then returning never repeats a mutation.
     await engineer.getByRole('button', { name: 'Sign out', exact: true }).click();
     await expect(engineer.getByRole('heading', { name: 'Sign in to your workspace' })).toBeVisible();

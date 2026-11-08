@@ -15,7 +15,7 @@ import (
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
-const SchemaVersion int32 = 4
+const SchemaVersion int32 = 5
 
 var ErrForbidden = errors.New("insufficient permission")
 var ErrNotFound = errors.New("not found")
@@ -86,7 +86,7 @@ func Migrate(ctx context.Context, dsn string) error {
 	if current > SchemaVersion {
 		return errors.New("FORWARD_ONLY_MIGRATIONS: database is newer than this binary")
 	}
-	if len(m.Migrations) != 4 {
+	if len(m.Migrations) != int(SchemaVersion) {
 		return errors.New("invalid embedded migration inventory")
 	}
 	for i, migration := range m.Migrations {

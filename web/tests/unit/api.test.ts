@@ -23,7 +23,7 @@ describe('API requests and the Go-owned response contract', () => {
         const second = vi.mocked(fetch).mock.calls[1][1]!;
         expect(first).toMatchObject({ method, credentials: 'same-origin', cache: 'no-store', body: '{"name":"Example"}' });
         expect(first.headers).toMatchObject({ 'Content-Type': 'application/json', 'X-Cosmoformer-Request': 'browser', 'X-CSRF-Token': 'fixture-csrf' });
-        expect((first.headers as Record<string, string>)['Idempotency-Key']).toMatch(/^[a-f0-9]{32}$/);
+        expect((first.headers as Record<string, string>)['Idempotency-Key']).toMatch(/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
         expect((first.headers as Record<string, string>)['Idempotency-Key']).not.toBe((second.headers as Record<string, string>)['Idempotency-Key']);
         expect(second.body).toBe('{}');
     });
