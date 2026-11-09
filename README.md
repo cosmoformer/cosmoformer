@@ -6,7 +6,7 @@ You can create local accounts, sign in, manage organizations and teams, and assi
 
 Evidence storage and redacted logging are available as bounded backend/worker capabilities. Artifact custody uses the platform EC2 role, a private versioned S3 bucket with SSE-S3, immutable upload receipts, and verified exact-version reads. Logs retain ordered segments or explicit loss gaps; previews are volatile and cannot prove completion. Browser evidence reads enforce current scope grants, with a separate raw-evidence grant. Native planning, execution, Apply and recovery workflows remain unavailable.
 
-The native execution control protocol adds closed execution identities, protected secret-input delivery, immutable pre-init evidence, one-way manifest sealing, and ordered command permissions/events/results. Permissions retain their identity and decreasing elapsed-time budget across retries; uncertain execution retains ownership. Schema version 8 stores these facts without changing migrations 001–007.
+The native execution control protocol adds closed execution identities, protected secret-input delivery, immutable pre-init evidence, one-way manifest sealing, and ordered command permissions/events/results. Permissions retain their identity and decreasing elapsed-time budget across retries; uncertain execution retains ownership. Schema version 8 stores these facts without changing migrations 001–007. Migration 009 requires schema version 9 and keeps trusted schemas ahead of temporary relations in every owner-executed database helper.
 
 Normal worker admission and scheduling remain source-preflight-only. The protocol is exercised with isolated PostgreSQL and injected native evidence boundaries. Native launches, plan analysis/readiness, approvals, Apply and recovery workflows remain unavailable. There is no execution enablement flag.
 
@@ -162,7 +162,7 @@ Coverage includes all application TypeScript/React files, including unvisited fi
 Serving never migrates implicitly. The runtime uses `COSMOFORMER_DATABASE_DSN_FILE`; migration/bootstrap/recovery commands use the separate `COSMOFORMER_MIGRATION_DSN_FILE`. Input files must be regular, owner-readable only. The development setup provisions distinct owner and restricted runtime database roles.
 
 ```sh
-# List the six embedded forward-only migrations without a database connection:
+# List the nine embedded forward-only migrations without a database connection:
 .build/tools/go/bin/go run ./cmd/cosmoformer migrate --list
 
 # Recover an existing enabled installation administrator on this local DB:
