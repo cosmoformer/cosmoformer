@@ -15,7 +15,7 @@ import (
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
-const SchemaVersion int32 = 8
+const SchemaVersion int32 = 9
 
 var ErrForbidden = errors.New("insufficient permission")
 var ErrNotFound = errors.New("not found")
@@ -50,6 +50,13 @@ func (s *Store) Ready(ctx context.Context) error {
 	e := s.Pool.QueryRow(ctx, `SELECT current_user='cosmoformer_app' AND NOT r.rolsuper AND NOT r.rolbypassrls AND NOT r.rolcreaterole AND NOT r.rolcreatedb AND NOT pg_has_role(current_user,'cosmoformer_owner','MEMBER') AND NOT has_schema_privilege(current_user,'cosmoformer','CREATE') AND NOT EXISTS(SELECT FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='cosmoformer' AND c.relowner=r.oid) AND NOT has_table_privilege(current_user,'cosmoformer.accounts','SELECT') AND has_function_privilege(current_user,'cosmoformer.session_identity(bytea)','EXECUTE') FROM pg_roles r WHERE rolname=current_user`).Scan(&safe)
 	if e != nil || !safe {
 		return errors.New("database runtime role has incompatible privileges")
+	}
+	if e = s.Pool.QueryRow(ctx, `SELECT NOT EXISTS (
+ SELECT FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+ WHERE n.nspname='cosmoformer' AND p.prosecdef
+ AND (p.proowner<>'cosmoformer_owner'::regrole
+ OR NOT coalesce('search_path=pg_catalog, cosmoformer, pg_temp'=ANY(p.proconfig),false)))`).Scan(&safe); e != nil || !safe {
+		return errors.New("database definer helpers have incompatible namespace protections")
 	}
 	if e = s.Pool.QueryRow(ctx, `SELECT
  NOT has_table_privilege(current_user,'cosmoformer.backup_sets','SELECT,INSERT,UPDATE,DELETE')

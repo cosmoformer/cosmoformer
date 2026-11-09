@@ -1,10 +1,7 @@
 package worker
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -40,45 +37,11 @@ func (a *Agent) FetchExecutionInputs(ctx context.Context, assignment runs.Assign
 		if total > 131072 {
 			return nil, ErrAgent
 		}
-		terms = append(terms, value.Value)
-		if strings.HasPrefix(value.Destination, "TF_VAR_") {
-			d := json.NewDecoder(bytes.NewBufferString(value.Value))
-			d.UseNumber()
-			var v any
-			if d.Decode(&v) == nil {
-				var leaves func(any)
-				leaves = func(v any) {
-					switch x := v.(type) {
-					case string:
-						if x != "" {
-							terms = append(terms, x)
-						}
-					case json.Number:
-						canonical, e := canonicalSecretNumber(string(x))
-						if e != nil {
-							terms = append(terms, "")
-							return
-						}
-						terms = append(terms, string(x), canonical)
-					case bool:
-						if x {
-							terms = append(terms, "true")
-						} else {
-							terms = append(terms, "false")
-						}
-					case []any:
-						for _, v := range x {
-							leaves(v)
-						}
-					case map[string]any:
-						for _, v := range x {
-							leaves(v)
-						}
-					}
-				}
-				leaves(v)
-			}
+		known, e := evidence.SecretTerms(value.Value, strings.HasPrefix(value.Destination, "TF_VAR_"))
+		if e != nil {
+			return nil, ErrAgent
 		}
+		terms = append(terms, known...)
 	}
 	if e := registry.Register(terms...); e != nil {
 		return nil, ErrAgent
@@ -134,50 +97,7 @@ func (p *LaunchPermission) DiscardExpired(id runs.Identity, attempt string, now 
 	return runs.CommandEvent{Ordinal: p.permission.Ordinal, Permission: p.permission.ID, Event: "not_executed", ProofReason: "local_deadline_expired_discarded"}, nil
 }
 
-// Canonical decimal strings match native scalar analysis without float loss.
-// Oversized expansion fails preparation instead of weakening secret masking.
+// Kept as a package-local alias for the preparation contract tests.
 func canonicalSecretNumber(value string) (string, error) {
-	negative := strings.HasPrefix(value, "-")
-	s := strings.TrimPrefix(value, "-")
-	exponent := 0
-	if at := strings.IndexAny(s, "eE"); at >= 0 {
-		var e error
-		exponent, e = strconv.Atoi(s[at+1:])
-		if e != nil || exponent < -16384 || exponent > 16384 {
-			return "", ErrAgent
-		}
-		s = s[:at]
-	}
-	decimal := strings.IndexByte(s, '.')
-	if decimal < 0 {
-		decimal = len(s)
-	}
-	digits := strings.ReplaceAll(s, ".", "")
-	position := decimal + exponent
-	if position < 0 {
-		digits = "0." + strings.Repeat("0", -position) + digits
-	} else if position >= len(digits) {
-		digits += strings.Repeat("0", position-len(digits))
-	} else {
-		digits = digits[:position] + "." + digits[position:]
-	}
-	halves := strings.SplitN(digits, ".", 2)
-	integer := strings.TrimLeft(halves[0], "0")
-	if integer == "" {
-		integer = "0"
-	}
-	result := integer
-	if len(halves) == 2 {
-		fraction := strings.TrimRight(halves[1], "0")
-		if fraction != "" {
-			result += "." + fraction
-		}
-	}
-	if result != "0" && negative {
-		result = "-" + result
-	}
-	if len(result) > 16384 {
-		return "", ErrAgent
-	}
-	return result, nil
+	return evidence.CanonicalNumber(value)
 }

@@ -87,6 +87,7 @@ FROM runtime AS native-tests
 COPY --from=native-test-build /out/acceptance.test /usr/local/bin/cosmoformer-native-tests
 COPY --from=native-test-build /out/provider-mirror /fixtures/provider-mirror
 COPY deploy/worker/runtimes.json /fixtures/runtimes.json
+COPY internal/testdata/plans.json internal/testdata/compatibility.json /fixtures/plan-analysis/
 ENTRYPOINT ["/usr/local/bin/cosmoformer-native-tests", "-test.run=^TestNativeEngineCompatibility$", "-test.v", "-test.timeout=20m"]
 
 # Local tooling depends only on reviewed public packages, never application code.

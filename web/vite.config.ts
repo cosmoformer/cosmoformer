@@ -24,7 +24,15 @@ export default defineConfig(({ command, isPreview }) => {
                 key: readFileSync(path.join(dir, 'key.pem')),
             } : undefined,
             proxy: {
-                '/api': { target: api },
+                '/api': {
+                    target: api,
+                    bypass(request) {
+                        // Set trusted metadata before creating the outgoing request:
+                        // the proxyReq event is skipped for Expect: 100-continue.
+                        // The API accepts it only over its owner-only Unix socket.
+                        request.headers['x-cosmoformer-client-ip'] = request.socket.remoteAddress ?? '';
+                    },
+                },
                 '/health': { target: api },
             },
         },

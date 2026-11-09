@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/md5"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -18,14 +19,20 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/cosmoformer/cosmoformer/internal/catalog"
 	"github.com/cosmoformer/cosmoformer/internal/clock"
+	"github.com/cosmoformer/cosmoformer/internal/evidence"
+	"github.com/cosmoformer/cosmoformer/internal/plan"
+	"github.com/cosmoformer/cosmoformer/internal/runs"
 	"github.com/cosmoformer/cosmoformer/internal/source"
 	"github.com/cosmoformer/cosmoformer/internal/worker"
+	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/hclsyntax"
 )
 
 type nativeHarness struct {
@@ -204,7 +211,8 @@ func TestNativeEngineCompatibility(t *testing.T) {
 				Resources map[string]json.RawMessage `json:"resource_schemas"`
 			} `json:"provider_schemas"`
 		}
-		if e := json.Unmarshal(h.run(checkout, "", 0, "providers", "schema", "-json"), &schema); e != nil {
+		rawSchema := h.run(checkout, "", 0, "providers", "schema", "-json")
+		if e := json.Unmarshal(rawSchema, &schema); e != nil {
 			t.Fatal(e)
 		}
 		aws := schema.Providers[registry+"/hashicorp/aws"]
@@ -224,6 +232,7 @@ func TestNativeEngineCompatibility(t *testing.T) {
 			}
 		}
 		t.Logf("AWS 6.41.0 schema format %s: %d resource schemas", schema.Format, len(aws.Resources))
+		h.verifyAnalysisFixtures(checkout, rawSchema)
 	})
 	t.Run("required_owner_attribute_rejected", func(t *testing.T) {
 		h := h
@@ -350,7 +359,8 @@ func (h nativeHarness) backendScenario(profile, workspace string, empty, edge bo
 		Changes []json.RawMessage          `json:"resource_changes"`
 		Outputs map[string]json.RawMessage `json:"output_changes"`
 	}
-	if e := json.Unmarshal(h.run(dir, workspace, 0, "show", "-json", plan), &shown); e != nil || shown.Format != "1.2" || shown.Version != h.profile.Version || len(shown.Outputs) != 2 {
+	rawPlan := h.run(dir, workspace, 0, "show", "-json", plan)
+	if e := json.Unmarshal(rawPlan, &shown); e != nil || shown.Format != "1.2" || shown.Version != h.profile.Version || len(shown.Outputs) != 2 {
 		t.Fatal("plan JSON profile mismatch", e, shown.Format, shown.Version)
 	}
 	var sensitive struct {
@@ -363,6 +373,7 @@ func (h nativeHarness) backendScenario(profile, workspace string, empty, edge bo
 	if (!empty && len(shown.Changes) != 1) || (empty && len(shown.Changes) != 0) {
 		t.Fatal("unexpected synthetic resource changes")
 	}
+	h.verifyNativeAnalysis(dir, schema, rawPlan)
 	fresh := checkout()
 	if lockErr == nil {
 		writeNative(t, filepath.Join(fresh, ".terraform.lock.hcl"), lock)
@@ -526,4 +537,176 @@ func nativeEndpointConfig(b *nativeBackend) string {
 
 func (h nativeHarness) backendContext(workspace string) source.BackendContext {
 	return source.BackendContext{Engine: catalog.Engine{Name: h.profile.Engine, Version: h.profile.Version}, Workspace: workspace, ExpectedOwner: "111122223333"}
+}
+
+// Exact schema evidence comes from the actual native command, not these
+// synthetic Changes fixtures. No AWS resources are planned or applied here.
+func (h nativeHarness) analysisOptions(dir string, schema []byte) plan.Options {
+	h.t.Helper()
+	o := plan.Options{Engine: h.profile.Engine, Version: h.profile.Version, ProfileID: plan.ProfileID(h.profile.Engine), Providers: []runs.Provider{}, ResourceIDs: map[string]string{}, OutputIDs: map[string]string{}, Secrets: &evidence.Registry{}}
+	var schemas struct {
+		Providers map[string]json.RawMessage `json:"provider_schemas"`
+	}
+	if json.Unmarshal(schema, &schemas) != nil {
+		h.t.Fatal("invalid schema capture")
+	}
+	lock, e := os.ReadFile(filepath.Join(dir, ".terraform.lock.hcl"))
+	m := runs.Manifest{ReviewedInputs: runs.ReviewedInputs{Engine: runs.ManifestEngine{Name: o.Engine, Version: o.Version, Arch: "amd64"}, Rules: plan.RuleVersion, Profile: o.ProfileID}, Providers: []runs.Provider{}}
+	if e == nil {
+		hash := sha256.Sum256(lock)
+		m.Lock = runs.ProviderLock{Present: true, Hash: hex.EncodeToString(hash[:]), Size: int64(len(lock))}
+		f, d := hclsyntax.ParseConfig(lock, "native-lock", hcl.InitialPos)
+		if d.HasErrors() {
+			h.t.Fatal("invalid native lock")
+		}
+		for _, block := range f.Body.(*hclsyntax.Body).Blocks {
+			p := runs.Provider{Address: block.Labels[0], Platform: "linux_amd64", Hashes: []string{}}
+			v, d := block.Body.Attributes["version"].Expr.Value(nil)
+			if d.HasErrors() {
+				h.t.Fatal("native version")
+			}
+			p.Version = v.AsString()
+			hashes, d := block.Body.Attributes["hashes"].Expr.Value(nil)
+			if d.HasErrors() {
+				h.t.Fatal("native hashes")
+			}
+			it := hashes.ElementIterator()
+			for it.Next() {
+				_, v := it.Element()
+				p.Hashes = append(p.Hashes, v.AsString())
+			}
+			sort.Strings(p.Hashes)
+			o.Providers = append(o.Providers, p)
+		}
+		sort.Slice(o.Providers, func(i, j int) bool { return o.Providers[i].Address < o.Providers[j].Address })
+	} else if !errors.Is(e, os.ErrNotExist) {
+		h.t.Fatal(e)
+	}
+	m.Providers = o.Providers
+	spec := runs.ExecutionSpec{Engine: runs.Runtime{Name: o.Engine, Version: o.Version, Arch: "amd64"}, RuleVersion: plan.RuleVersion, ProfileID: o.ProfileID}
+	if e = (plan.Verifier{}).VerifySchema(context.Background(), spec, m, schema); e != nil {
+		h.t.Fatal("native schema/profile rejected", e)
+	}
+	return o
+}
+func (h nativeHarness) verifyNativeAnalysis(dir string, schema, raw []byte) {
+	h.t.Helper()
+	o := h.analysisOptions(dir, schema)
+	var native struct {
+		Resources []struct {
+			Address string `json:"address"`
+		} `json:"resource_changes"`
+		Outputs map[string]json.RawMessage `json:"output_changes"`
+	}
+	if json.Unmarshal(raw, &native) != nil {
+		h.t.Fatal("native plan decode")
+	}
+	for _, r := range native.Resources {
+		o.ResourceIDs[r.Address] = runs.ID()
+	}
+	for name := range native.Outputs {
+		o.OutputIDs[name] = runs.ID()
+	}
+	out, e := plan.Analyze(raw, schema, o)
+	if e != nil {
+		h.t.Fatal("actual native plan analysis failed", e)
+	}
+	for _, r := range out.Outputs {
+		if r.Address == "sensitive_fixture" && (r.Paths[0].Before.State != "hidden" || r.Paths[0].After.State != "hidden") {
+			h.t.Fatal("actual native sensitivity lost")
+		}
+	}
+	for _, c := range out.Coverage {
+		if c.Status != "generic_only" {
+			h.t.Fatal("null provider received service semantics")
+		}
+	}
+}
+func (h nativeHarness) verifyAnalysisFixtures(dir string, schema []byte) {
+	t := h.t
+	o := h.analysisOptions(dir, schema)
+	var fixture struct {
+		Cases []struct {
+			Name     string          `json:"name"`
+			Plan     json.RawMessage `json:"plan"`
+			Error    bool            `json:"error"`
+			Expected []struct {
+				Rule     string `json:"rule_id"`
+				Severity string `json:"severity"`
+				Message  string `json:"message_code"`
+			} `json:"expected"`
+			Secrets []struct {
+				Value string `json:"value"`
+				JSON  bool   `json:"json_variable"`
+			} `json:"secrets"`
+		} `json:"cases"`
+	}
+	b, e := os.ReadFile("/fixtures/plan-analysis/plans.json")
+	if e != nil || json.Unmarshal(b, &fixture) != nil {
+		t.Fatal("missing native analysis fixture corpus", e)
+	}
+	for _, f := range fixture.Cases {
+		t.Run("analysis/"+f.Name, func(t *testing.T) {
+			var native map[string]any
+			d := json.NewDecoder(bytes.NewReader(f.Plan))
+			d.UseNumber()
+			if d.Decode(&native) != nil {
+				t.Fatal("fixture JSON")
+			}
+			// Only translate the fixture engine/provider identity. Preserve deliberately
+			// malformed format/version cases so production validation must reject them.
+			if native["terraform_version"] == "1.13.8" {
+				native["terraform_version"] = h.profile.Version
+			}
+			options := o
+			options.ResourceIDs = map[string]string{}
+			options.OutputIDs = map[string]string{}
+			options.Secrets = &evidence.Registry{}
+			for _, kind := range []string{"resource_changes", "resource_drift"} {
+				if a, ok := native[kind].([]any); ok {
+					for _, v := range a {
+						r := v.(map[string]any)
+						r["provider_name"] = h.profile.Packages[1].Sources[0]
+						options.ResourceIDs[r["address"].(string)] = "11111111-1111-4111-8111-111111111111"
+					}
+				}
+			}
+			if outputs, ok := native["output_changes"].(map[string]any); ok {
+				for name := range outputs {
+					options.OutputIDs[name] = "22222222-2222-4222-8222-222222222222"
+				}
+			}
+			for _, s := range f.Secrets {
+				terms, e := evidence.SecretTerms(s.Value, s.JSON)
+				if e != nil || options.Secrets.Register(terms...) != nil {
+					t.Fatal("invalid fixture secrets")
+				}
+			}
+			raw, _ := json.Marshal(native)
+			out, e := plan.Analyze(raw, schema, options)
+			if f.Error {
+				if e == nil || out != nil {
+					t.Fatal("invalid native analysis accepted")
+				}
+				return
+			}
+			if e != nil {
+				t.Fatal(e)
+			}
+			if len(out.Findings) != len(f.Expected) {
+				t.Fatalf("unexpected findings: %+v", out.Findings)
+			}
+			for i, w := range f.Expected {
+				f := out.Findings[i]
+				if f.Rule != w.Rule || f.Severity != w.Severity || w.Message != "" && f.Message != w.Message {
+					t.Fatalf("unexpected native finding: %+v", f)
+				}
+			}
+		})
+	}
+	if t.Failed() {
+		return
+	}
+	hash := sha256.Sum256(schema)
+	t.Logf("verified profile %s: AWS 6.41.0, raw schema SHA-256 %x, %d synthetic analysis cases against actual native schema; production execution disabled; company not_assessed", o.ProfileID, hash, len(fixture.Cases))
 }

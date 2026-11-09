@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"io"
 	"mime"
-	"net"
 	"net/http"
 	"regexp"
 	"strings"
@@ -43,7 +42,7 @@ type Problem struct {
 func (p *Problem) Error() string  { return p.Message }
 func (p *Problem) GetStatus() int { return p.Status }
 func problem(ctx context.Context, status int, message string) *Problem {
-	codes := map[int]string{400: "INVALID_REQUEST", 401: "SIGN_IN_REQUIRED", 403: "FORBIDDEN", 404: "NOT_FOUND", 409: "CONFLICT", 422: "INVALID_INPUT", 429: "TRY_AGAIN", 503: "UNAVAILABLE"}
+	codes := map[int]string{400: "INVALID_REQUEST", 401: "SIGN_IN_REQUIRED", 403: "FORBIDDEN", 404: "NOT_FOUND", 405: "METHOD_NOT_ALLOWED", 409: "CONFLICT", 422: "INVALID_INPUT", 429: "TRY_AGAIN", 503: "UNAVAILABLE"}
 	return &Problem{Status: status, Code: codes[status], Message: message, RequestID: request(ctx).ID}
 }
 func init() {
@@ -128,6 +127,11 @@ func (a *Server) middleware(next http.Handler) http.Handler {
 		r.Body = http.MaxBytesReader(w, r.Body, limit)
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			public := r.URL.Path == "/api/v1/session/login" || r.URL.Path == "/api/v1/account/setup" || r.URL.Path == "/api/v1/account/reset"
+			if public && r.Method != "POST" {
+				w.Header().Set("Allow", "POST")
+				writeProblem(w, r, 405, "Use POST for this operation.")
+				return
+			}
 			mutation := r.Method != "GET" && r.Method != "HEAD"
 			if mutation {
 				media, _, e := mime.ParseMediaType(r.Header.Get("Content-Type"))
@@ -137,10 +141,12 @@ func (a *Server) middleware(next http.Handler) http.Handler {
 				}
 			}
 			if public {
-				ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-				// Forwarding headers are deliberately ignored. Only the local/private
-				// reverse proxy connects here; no arbitrary trusted-proxy configuration.
-				if !l.allow(ip) {
+				client, ok := authenticationClient(r)
+				if !ok {
+					writeProblem(w, r, 400, "Client address is unavailable.")
+					return
+				}
+				if !l.allow(client) {
 					w.Header().Set("Retry-After", "60")
 					writeProblem(w, r, 429, "Too many attempts. Try again shortly.")
 					return

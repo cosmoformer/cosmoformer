@@ -11,6 +11,7 @@ require (
 	github.com/aws/smithy-go v1.28.8
 	github.com/danielgtaylor/huma/v2 v2.40.0
 	github.com/hashicorp/hcl/v2 v2.25.0
+	github.com/hashicorp/terraform-json v0.29.0
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/jackc/tern/v2 v2.4.3
 	github.com/zclconf/go-cty v1.19.0
@@ -36,6 +37,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.14.9 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.20.9 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/hashicorp/go-version v1.9.0 // indirect
 	github.com/huandu/xstrings v1.5.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect

@@ -20,6 +20,7 @@ import (
 	"github.com/cosmoformer/cosmoformer/internal/coordinator"
 	"github.com/cosmoformer/cosmoformer/internal/evidence"
 	"github.com/cosmoformer/cosmoformer/internal/identity"
+	"github.com/cosmoformer/cosmoformer/internal/plan"
 	"github.com/cosmoformer/cosmoformer/internal/runs"
 )
 
@@ -248,6 +249,16 @@ func TestExecutionSecretDeliveryAndAuthority(t *testing.T) {
 	values, e := f.agent.FetchExecutionInputs(ctx, f.assignment, registry)
 	if e != nil || len(values) != 1 || values[0].Value != f.secret {
 		t.Fatal("protected input delivery", e)
+	}
+	// The future readiness boundary must validate independently of this worker's
+	// registry, including malicious message arguments and canonical JSON leaves.
+	for _, leak := range []string{`{"findings":[{"arguments":{"text":"synthetic-native-value-74"}}]}`, `{"number":9.2713e4}`, `{"address_display":"resource[\"synthetic-native-value-74\"]"}`} {
+		if plan.ValidateManagedSecrets([]byte(leak), values) != plan.ErrLeak {
+			t.Fatal("platform accepted leaking normalized evidence")
+		}
+	}
+	if plan.ValidateManagedSecrets([]byte(`{"state":"hidden"}`), values) != nil {
+		t.Fatal("platform rejected redacted evidence")
 	}
 	pipe := registry.Pipe()
 	masked := string(pipe.Feed([]byte("synthetic-native-value-74 92713 true "+f.secret), true))
