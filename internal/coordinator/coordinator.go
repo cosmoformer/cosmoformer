@@ -1,5 +1,5 @@
-// Package coordinator implements the gated source-only worker protocol. It
-// deliberately has no native command or cloud credential execution path.
+// Package coordinator implements worker coordination and the native control
+// protocol. Production admission and scheduling remain source-preflight-only.
 package coordinator
 
 import (
@@ -14,6 +14,7 @@ import (
 	"github.com/cosmoformer/cosmoformer/internal/bitbucket"
 	"github.com/cosmoformer/cosmoformer/internal/catalog"
 	"github.com/cosmoformer/cosmoformer/internal/clock"
+	"github.com/cosmoformer/cosmoformer/internal/evidence"
 	"github.com/cosmoformer/cosmoformer/internal/identity"
 	"github.com/cosmoformer/cosmoformer/internal/runs"
 	"github.com/cosmoformer/cosmoformer/internal/source"
@@ -22,14 +23,19 @@ import (
 )
 
 type Coordinator struct {
-	Store    *store.Store
-	Clock    clock.Source
-	Instance string
+	Store          *store.Store
+	Clock          clock.Source
+	Instance       string
+	Evidence       *evidence.Custody
+	ObserveSource  func(context.Context, string, string) (bitbucket.Facts, error)
+	NativeEvidence NativeEvidenceVerifier
 }
 
-func New(s *store.Store, c clock.Source) *Coordinator { return &Coordinator{s, c, runs.ID()} }
-func digest(v any) []byte                             { b, _ := catalog.Canonical(v); h := sha256.Sum256(b); return h[:] }
-func hexDigest(v any) string                          { return hex.EncodeToString(digest(v)) }
+func New(s *store.Store, c clock.Source) *Coordinator {
+	return &Coordinator{Store: s, Clock: c, Instance: runs.ID()}
+}
+func digest(v any) []byte    { b, _ := catalog.Canonical(v); h := sha256.Sum256(b); return h[:] }
+func hexDigest(v any) string { return hex.EncodeToString(digest(v)) }
 
 type Worker struct {
 	ID     string `json:"id"`
@@ -268,17 +274,30 @@ func (c *Coordinator) Poll(ctx context.Context, token string, in runs.Poll) (*ru
 func (c *Coordinator) assignment(ctx context.Context, tx pgx.Tx, id string) (*runs.Assignment, error) {
 	var a runs.Assignment
 	var b []byte
-	e := tx.QueryRow(ctx, `SELECT a.id::text,a.operation_id::text,a.work_item_id::text,o.kind,wi.phase,o.run_id::text,a.stack_id::text,wi.assignment_spec,a.cap_seconds,a.budget_platform_instance::text,coalesce((SELECT max(sequence)+1 FROM cosmoformer.attempt_messages WHERE attempt_id=a.id),1) FROM cosmoformer.attempts a JOIN cosmoformer.operations o ON o.id=a.operation_id JOIN cosmoformer.work_items wi ON wi.id=a.work_item_id WHERE a.id=$1`, id).Scan(&a.AttemptID, &a.OperationID, &a.WorkItemID, &a.Kind, &a.Phase, &a.RunID, &a.StackID, &b, &a.CapSeconds, &a.Platform, &a.NextSeq)
+	var specDigest string
+	e := tx.QueryRow(ctx, `SELECT a.id::text,a.operation_id::text,a.work_item_id::text,o.kind,wi.phase,o.run_id::text,a.stack_id::text,coalesce(a.execution_spec,wi.assignment_spec),a.cap_seconds,a.budget_platform_instance::text,coalesce(encode(a.execution_spec_digest,'hex'),''),coalesce((SELECT max(sequence)+1 FROM cosmoformer.attempt_messages WHERE attempt_id=a.id),1) FROM cosmoformer.attempts a JOIN cosmoformer.operations o ON o.id=a.operation_id JOIN cosmoformer.work_items wi ON wi.id=a.work_item_id WHERE a.id=$1`, id).Scan(&a.AttemptID, &a.OperationID, &a.WorkItemID, &a.Kind, &a.Phase, &a.RunID, &a.StackID, &b, &a.CapSeconds, &a.Platform, &specDigest, &a.NextSeq)
 	if e != nil {
 		return nil, e
 	}
-	if json.Unmarshal(b, &a.Spec) != nil {
+	if a.Phase == "execution" {
+		a.Execution = &runs.ExecutionSpec{}
+		if runs.Decode(b, a.Execution) != nil || a.Execution.Validate() != nil {
+			return nil, runs.Fail("INVALID_SPEC")
+		}
+		a.Spec = a.Execution.Preflight()
+	} else if runs.Decode(b, &a.Spec) != nil {
 		return nil, runs.Fail("INVALID_SPEC")
 	}
 	a.Source = a.Spec.Source
 	a.StackRevisionID = a.Spec.StackRevisionID
 	a.RuntimeID = a.Spec.Engine.ID
 	a.Digest = hexDigest(a.Spec)
+	if a.Execution != nil {
+		a.Digest = runs.Digest(a.Execution)
+		if a.Digest != specDigest {
+			return nil, runs.Fail("INVALID_SPEC")
+		}
+	}
 	return &a, nil
 }
 func (c *Coordinator) remaining(ctx context.Context, tx pgx.Tx, a *runs.Assignment, tick time.Duration) error {
@@ -453,6 +472,18 @@ func (c *Coordinator) RequireObservation(ctx context.Context, tx pgx.Tx, o Obser
 func (c *Coordinator) Transition(ctx context.Context, token, route string, m runs.Message) (*runs.Transition, error) {
 	if m.Protocol != 1 || !catalog.UUID(m.MessageID) || !catalog.UUID(m.AttemptID) || m.Seq < 1 || m.Seq > 9007199254740991 {
 		return nil, runs.Fail("INVALID_REQUEST")
+	}
+	var native bool
+	if e := c.workerTx(ctx, token, func(tx pgx.Tx, w Worker) error {
+		if e := c.current(ctx, tx, w, m.Identity, false); e != nil {
+			return e
+		}
+		return tx.QueryRow(ctx, `SELECT wi.phase='execution' FROM cosmoformer.attempts a JOIN cosmoformer.work_items wi ON wi.id=a.work_item_id WHERE a.id=$1 AND a.worker_id=$2 AND a.generation=$3 AND a.agent_instance=$4`, m.AttemptID, w.ID, m.Generation, m.Agent).Scan(&native)
+	}); e != nil {
+		return nil, e
+	}
+	if native {
+		return c.executionTransition(ctx, token, route, m)
 	}
 	var out runs.Transition
 	var conflict bool
@@ -708,7 +739,12 @@ func (c *Coordinator) WithAttempt(ctx context.Context, token string, id runs.Ide
 		if a.RemainingMS <= 0 {
 			return runs.Fail("ATTEMPT_BUDGET_INSTANCE_ENDED")
 		}
-		if e = c.authority(ctx, tx, a.OperationID, a.Spec); e != nil {
+		if a.Execution != nil {
+			e = c.executionAuthority(ctx, tx, *a)
+		} else {
+			e = c.authority(ctx, tx, a.OperationID, a.Spec)
+		}
+		if e != nil {
 			return e
 		}
 		return fn(tx, w, *a)

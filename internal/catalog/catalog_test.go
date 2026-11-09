@@ -63,3 +63,80 @@ func TestManifestRejectsNumericBackendOwner(t *testing.T) {
 		t.Fatal("numeric owner metadata accepted")
 	}
 }
+
+func TestOmittedOptionalCollectionsUseExplicitEmptyDefaults(t *testing.T) {
+	raw, _ := yaml.Marshal(Manifest{1, []Stack{fixture()}})
+	var doc map[string]any
+	if e := yaml.Unmarshal(raw, &doc); e != nil {
+		t.Fatal(e)
+	}
+	stack := doc["stacks"].([]any)[0].(map[string]any)
+	for _, name := range []string{"backend_config_files", "var_files", "secrets", "change_paths", "depends_on", "approvals"} {
+		delete(stack, name)
+	}
+	delete(stack["worker"].(map[string]any), "tags")
+	raw, _ = yaml.Marshal(doc)
+	parsed, e := Parse(raw)
+	if e != nil {
+		t.Fatal(e)
+	}
+	got := parsed.Stacks[0]
+	if got.BackendFiles == nil || got.VarFiles == nil || got.Secrets == nil || got.ChangePaths == nil || got.DependsOn == nil || got.Worker.Tags == nil || got.Approvals.Minimum != 1 {
+		t.Fatal("omitted collections or approval default remained ambiguous", got)
+	}
+}
+func TestManifestRejectsExcessiveAndAmbiguousYAMLSyntax(t *testing.T) {
+	raw, _ := yaml.Marshal(Manifest{1, []Stack{fixture()}})
+	for name, value := range map[string][]byte{
+		"oversized": bytes.Repeat([]byte("x"), 1048577), "invalid UTF8": {0xff}, "empty": {}, "broken sequence": []byte("version: 1\nstacks: ["),
+		"non-string mapping key": []byte("version: 1\nstacks: []\ntrue: value\n"),
+		"implicit float":         bytes.Replace(raw, []byte("name: Fictional"), []byte("name: 1.25"), 1),
+		"nested depth":           []byte("version: 1\nstacks: " + strings.Repeat("[", 34) + strings.Repeat("]", 34)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, e := Parse(value); e == nil {
+				t.Fatal("unsupported syntax accepted")
+			}
+		})
+	}
+	for _, stacks := range [][]Stack{{fixture(), fixture()}, make([]Stack, 1001)} {
+		raw, _ := yaml.Marshal(Manifest{1, stacks})
+		if _, e := Parse(raw); e == nil {
+			t.Fatal("duplicate or excessive stack declarations accepted")
+		}
+	}
+}
+func TestStackCollectionsCannotExpandScopeOrOverwriteSecretDestinations(t *testing.T) {
+	for name, change := range map[string]func(*Stack){
+		"too many input files": func(s *Stack) { s.VarFiles = make([]string, 33) },
+		"duplicate input file": func(s *Stack) { s.BackendFiles = []string{"backend.hcl", "backend.hcl"} },
+		"invalid tag":          func(s *Stack) { s.Worker.Tags = []string{"INVALID TAG"} },
+		"self dependency":      func(s *Stack) { s.DependsOn = []string{s.ID} },
+		"secret scope": func(s *Stack) {
+			s.Secrets = []Secret{{Source: SecretSource{Scope: "account", ID: s.ID}, Env: "SERVICE_TOKEN"}}
+		},
+		"duplicate destination": func(s *Stack) {
+			v := Secret{Source: SecretSource{Scope: "org", ID: s.ID}, Env: "SERVICE_TOKEN"}
+			s.Secrets = []Secret{v, v}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := fixture()
+			change(&s)
+			if s.Validate() == nil {
+				t.Fatal("invalid collection accepted")
+			}
+		})
+	}
+	for _, branch := range []string{"main\x01", "feature/.hidden", "feature/end.lock", "feature//empty"} {
+		if Branch(branch) {
+			t.Fatal("ambiguous branch accepted", branch)
+		}
+	}
+	if SecretEnv("invalid-name") {
+		t.Fatal("invalid environment destination accepted")
+	}
+	if _, e := Canonical(make(chan int)); e == nil {
+		t.Fatal("uncanonical value accepted")
+	}
+}

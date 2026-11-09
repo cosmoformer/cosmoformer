@@ -115,22 +115,23 @@ type Poll struct {
 	Wait      int    `json:"wait_seconds"`
 }
 type Assignment struct {
-	AttemptID       string        `json:"attempt_id"`
-	OperationID     string        `json:"operation_id"`
-	WorkItemID      string        `json:"work_item_id"`
-	Kind            string        `json:"kind"`
-	Phase           string        `json:"phase"`
-	RunID           string        `json:"run_id"`
-	StackID         string        `json:"stack_id"`
-	Source          Source        `json:"source"`
-	StackRevisionID string        `json:"stack_revision_id"`
-	RuntimeID       string        `json:"runtime_id"`
-	CapSeconds      int64         `json:"cap_seconds"`
-	Spec            PreflightSpec `json:"execution_spec"`
-	Digest          string        `json:"execution_spec_digest"`
-	RemainingMS     int64         `json:"remaining_attempt_ms"`
-	Platform        string        `json:"budget_platform_instance"`
-	NextSeq         int64         `json:"next_seq"`
+	AttemptID       string         `json:"attempt_id"`
+	OperationID     string         `json:"operation_id"`
+	WorkItemID      string         `json:"work_item_id"`
+	Kind            string         `json:"kind"`
+	Phase           string         `json:"phase"`
+	RunID           string         `json:"run_id"`
+	StackID         string         `json:"stack_id"`
+	Source          Source         `json:"source"`
+	StackRevisionID string         `json:"stack_revision_id"`
+	RuntimeID       string         `json:"runtime_id"`
+	CapSeconds      int64          `json:"cap_seconds"`
+	Spec            PreflightSpec  `json:"execution_spec"`
+	Execution       *ExecutionSpec `json:"-"`
+	Digest          string         `json:"execution_spec_digest"`
+	RemainingMS     int64          `json:"remaining_attempt_ms"`
+	Platform        string         `json:"budget_platform_instance"`
+	NextSeq         int64          `json:"next_seq"`
 }
 type Message struct {
 	Protocol  int    `json:"protocol_version"`
@@ -141,7 +142,7 @@ type Message struct {
 	Payload   json.RawMessage `json:"payload"`
 }
 type Prepare struct {
-	Phase         string          `json:"phase"`
+	Phase         string          `json:"phase" enum:"preflight"`
 	Result        string          `json:"result"`
 	Digest        string          `json:"source_digest"`
 	Backend       source.Backend  `json:"backend"`
@@ -166,13 +167,14 @@ type Result struct {
 	Reaped       bool      `json:"source_processes_reaped"`
 }
 type Transition struct {
-	Accepted           bool   `json:"accepted"`
-	NextSeq            int64  `json:"next_seq"`
-	AttemptState       string `json:"attempt_state"`
-	OperationStatus    string `json:"operation_status"`
-	Revision           int64  `json:"revision"`
-	Ready              bool   `json:"ready"`
-	NextCommandOrdinal int    `json:"next_command_ordinal"`
+	Permission         *Permission `json:"-"`
+	Accepted           bool        `json:"accepted"`
+	NextSeq            int64       `json:"next_seq"`
+	AttemptState       string      `json:"attempt_state"`
+	OperationStatus    string      `json:"operation_status"`
+	Revision           int64       `json:"revision"`
+	Ready              bool        `json:"ready"`
+	NextCommandOrdinal int         `json:"next_command_ordinal"`
 }
 type Effective struct {
 	Declaration catalog.Stack      `json:"declaration"`

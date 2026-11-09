@@ -6,7 +6,9 @@ You can create local accounts, sign in, manage organizations and teams, and assi
 
 Evidence storage and redacted logging are available as bounded backend/worker capabilities. Artifact custody uses the platform EC2 role, a private versioned S3 bucket with SSE-S3, immutable upload receipts, and verified exact-version reads. Logs retain ordered segments or explicit loss gaps; previews are volatile and cannot prove completion. Browser evidence reads enforce current scope grants, with a separate raw-evidence grant. Native planning, execution, Apply and recovery workflows remain unavailable.
 
-This milestone builds on schema alignment reviewed at `2cb1c94` and merged into `main` as `0eda065` (PR #4). The feature branch is rebased onto that updated `main`.
+The native execution control protocol adds closed execution identities, protected secret-input delivery, immutable pre-init evidence, one-way manifest sealing, and ordered command permissions/events/results. Permissions retain their identity and decreasing elapsed-time budget across retries; uncertain execution retains ownership. Schema version 8 stores these facts without changing migrations 001–007.
+
+Normal worker admission and scheduling remain source-preflight-only. The protocol is exercised with isolated PostgreSQL and injected native evidence boundaries. AWS execution-role sessions, native launches, plan analysis/readiness, approvals, Apply and recovery workflows remain unavailable. There is no execution enablement flag.
 
 ## Local development
 
@@ -106,7 +108,7 @@ Native checks cover exact Git commits, AWS/null schemas, output-only roots witho
 
 Key validation uses the selected pinned runtime: both reject leading/trailing slashes in raw keys and prefixes; Terraform also rejects repeated slashes in raw keys. OpenTofu accepts those keys. Both accept repeated internal prefix slashes and use native joining for non-default workspaces. Invalid keys are rejected before joining, never cleaned into another destination. Update existing fixture declarations explicitly and run a fresh source check; no state, permanent claim or queued assignment is automatically rewritten. Company compatibility remains unassessed.
 
-Individual targets: `test-unit`, `test-integration`, `test-source`, `test-scripts`, `test-native`, `test-local`, `test-web`. `test-source` includes worker-command startup and clock tests inside the baked Linux image, so these checks cannot silently skip in normal CI. `test-scripts` verifies profile merging, actual contract generation and the real Make native-test recipe with stubbed Docker commands; both are included in `make check`. `test-web` runs TypeScript checks, frontend unit/component tests with coverage, the production build, and Playwright journeys in Chromium and Firefox. The browser suite serves the compiled SPA over local HTTPS, starts its own account server, and exercises sign-in, setup, invitations, grant/revocation and empty-access flows. Source settings, secret-write errors, source-check controls and worker credential visibility also have component tests against the actual generated API validators. Safari is not covered by this automated suite.
+Individual targets: `test-unit`, `test-integration`, `test-source`, `test-scripts`, `test-native`, `test-local`, `test-web`. `test-source` includes worker-command startup and clock tests inside the baked Linux image; CI runs these same suites through `test-go-coverage`. `test-scripts` verifies coverage merging and thresholds, actual contract generation and the real Make native-test recipe with stubbed Docker commands; it is included in `make check` and emits helper-script LCOV. `test-web` runs TypeScript checks, frontend unit/component tests with coverage, the production build, and Playwright journeys in Chromium and Firefox. The browser suite serves the compiled SPA over local HTTPS, starts its own account server, and exercises sign-in, setup, invitations, grant/revocation and empty-access flows. Source settings, secret-write errors, source-check controls and worker credential visibility also have component tests against the actual generated API validators. Safari is not covered by this automated suite.
 
 Frontend tests use Vitest, React Testing Library and jsdom. They exercise the actual API client and Go-generated response validators with controlled HTTP responses, real router/theme contexts, and session timers. They cover error handling, CSRF headers, expiry and stale responses, setup/reset/sign-in forms, scope changes, account administration and team/grant controls. These tests do not replace browser checks or the server's permission tests.
 
@@ -116,16 +118,32 @@ make test-web-coverage   # frontend coverage only
 cd web && npm run test:unit:watch
 ```
 
-With the isolated test database running, `make test-coverage` generates both Go and frontend coverage. `make test-go-coverage` measures Go unit and acceptance tests together, including coverage from the real command processes. It also runs the pinned Linux worker image with networking disabled, collecting source, worker, clock and worker-command coverage. Each run uses fresh temporary directories. Host and Linux profiles are merged by source block, retaining a block as covered if either run exercised it; shared code is counted once. Docker is required for this target. Command tests cover argument/exit behavior, protected proof files, migration and role checks, bootstrap/recovery, API startup and graceful shutdown. Unit command checks need no database; command integration checks use only the marked throwaway database. Reports are ignored local outputs:
+With the isolated test database running, `make test-coverage` generates Go, frontend, contract and helper-script coverage. `make test-go-coverage` measures Go unit and acceptance tests together, including coverage from the real command processes. It also runs the pinned Linux worker image with networking disabled, collecting source, worker, clock and worker-command coverage. Each run uses fresh temporary directories. Host and Linux profiles are merged by source block, retaining a block as covered if either run exercised it; shared code is counted once. Docker is required for this target. Command tests cover argument/exit behavior, protected proof files, migration and role checks, bootstrap/recovery, API startup and graceful shutdown. Unit command checks need no database; command integration checks use only the marked throwaway database. Reports are ignored local outputs:
 
 - `.build/coverage/go.out`: Go coverage for SonarQube.
 - `.build/coverage/go.html`: browsable Go report.
-- `.build/coverage/scripts/lcov.info`: coverage of the profile merger, collected by Node's built-in test runner.
+- `.build/coverage/scripts/lcov.info`: coverage of the profile merger and Go coverage check, collected by Node's built-in test runner.
 - `.build/coverage/contract/lcov.info`: coverage of actual Go contract generation and browser-validator emission, including strict response and safe integer checks.
+- `.build/coverage/workflows/lcov.info`: helper-script unit and process-supervision coverage.
+- `.build/coverage/runtime/lcov.info`: coverage from the real local-storage CLI and seed-client acceptance suites; collected by `test-runtime-coverage`, also included in `make check`.
 - `.build/coverage/web/lcov.info`: frontend coverage with repository-relative source paths for SonarQube.
 - `.build/coverage/web/index.html`: browsable frontend report.
 
-Coverage includes all application TypeScript/React files, including unvisited files; generated API code is excluded. The local setup and tool installer are also tested with mocked files, downloads and child commands. Their coverage is included in the same LCOV. Frontend coverage checks still require 90% statements, lines and functions, and 85% branches independently of those helpers. Playwright remains a separate functional browser check; its coverage is not merged into the unit report.
+`make test-go-coverage` fails unless total Go statement coverage is strictly greater than 80%; exactly 80% fails. This uses the merged host/Linux counts rather than averaging package percentages. `make check`, which runs in CI, includes this coverage check and Go vet in place of repeating the same Go suites separately.
+
+CI also runs `make test-overall-coverage` against a fresh, pinned SonarQube service after all coverage suites. Both **overall combined coverage and overall line coverage must be strictly greater than 80%**; exactly 80% fails. The gate uses integer covered/total counts, not rounded percentages or package averages, and does not depend on a new-code baseline or the default Sonar quality gate. Missing, empty or stale reports, changed source/HEAD, incomplete analysis, missing Go/JavaScript/TypeScript analysis, and mismatched analysis IDs fail the job. No application-source coverage exclusions were added.
+
+`make check` and `make test-coverage` begin a collection receipt and generate the five required reports. `make check` also retains the native, browser and other functional checks. The CI service is disposable, loopback-published and uses an ephemeral evaluation database; it is not part of the product deployment. The scanner shares only that service's network namespace and reads a prepared source snapshot. Its project token is held in an owner-only temporary file and removed after the scan. For local verification, use a fresh container of the pinned Sonar image on a dedicated Docker network, publish its port 9000 only on loopback, then run:
+
+```sh
+COSMOFORMER_SONAR_CONTAINER=<fresh-container-id> \
+COSMOFORMER_SONAR_ORIGIN=http://127.0.0.1:<published-port> \
+make test-overall-coverage
+```
+
+A previously initialized Sonar service is not reusable for this target: the gate requires factory bootstrap and creation of a new project. Stop and remove only the disposable container/network you created afterward. Source files and HEAD must remain unchanged from collection through analysis. The exact task/analysis IDs, source digest, integer counts and pass/fail result are retained in `.build/coverage/overall.json`; scanner diagnostics are in `.build/coverage/sonar/scanner.log`.
+
+Coverage includes all application TypeScript/React files, including unvisited files; generated API code is excluded. The local setup, tool installer, readiness checks, development-session supervisor and brand exporter are also tested with controlled files, downloads and child commands. Their coverage is included in the same LCOV. Frontend coverage checks still require 90% statements, lines and functions, and 85% branches independently of those helpers. Playwright remains a separate functional browser check; its coverage is not merged into the unit report.
 
 `make contract` exports the Go-owned API and generates browser types/response validators. `.build/openapi.json`, `web/app/.generated`, tool caches and build outputs are ignored. Design documents stay outside this repository.
 

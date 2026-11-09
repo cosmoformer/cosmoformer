@@ -44,6 +44,7 @@ type sourceTransport struct {
 	manifest      []byte
 	commit        string
 	prDestination string
+	prState       string
 	mu            sync.Mutex
 }
 
@@ -65,7 +66,11 @@ func (s *sourceTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 		if destination == "" {
 			destination = "main"
 		}
-		body = []byte(`{"state":"OPEN","source":{"repository":{"uuid":"{fictional-repository}"},"commit":{"hash":"` + s.commit + `"},"branch":{"name":"change"}},"destination":{"repository":{"uuid":"{fictional-repository}"},"branch":{"name":"` + destination + `"}}}`)
+		state := s.prState
+		if state == "" {
+			state = "OPEN"
+		}
+		body = []byte(`{"state":"` + state + `","source":{"repository":{"uuid":"{fictional-repository}"},"commit":{"hash":"` + s.commit + `"},"branch":{"name":"change"}},"destination":{"repository":{"uuid":"{fictional-repository}"},"branch":{"name":"` + destination + `"}}}`)
 	}
 	return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body)), Request: r}, nil
 }
@@ -102,6 +107,14 @@ func (l *lossTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 func newPreflightFixture(t *testing.T, requiredTags ...[]string) *preflightFixture {
 	t.Helper()
+	return newPreflightFixtureWithNative(t, nil, requiredTags...)
+}
+func newPreflightFixtureWithNative(t *testing.T, native coordinator.NativeEvidenceVerifier, requiredTags ...[]string) *preflightFixture {
+	t.Helper()
+	return newPreflightFixtureForSource(t, native, map[string]any{"kind": "branch"}, requiredTags...)
+}
+func newPreflightFixtureForSource(t *testing.T, native coordinator.NativeEvidenceVerifier, source map[string]any, requiredTags ...[]string) *preflightFixture {
+	t.Helper()
 	ticks := &testClock{tick: time.Second}
 	remote := &sourceTransport{commit: strings.Repeat("a", 40)}
 	cipher, e := cryptostore.New(bytes.Repeat([]byte{42}, 32))
@@ -109,7 +122,7 @@ func newPreflightFixture(t *testing.T, requiredTags ...[]string) *preflightFixtu
 		t.Fatal(e)
 	}
 	storage := &evidenceStorage{objects: map[string]string{}}
-	options := httpapi.Options{Evidence: &evidence.Custody{Storage: storage, Bucket: "synthetic"}, Clock: ticks, Cipher: cipher, Bitbucket: bitbucket.New(&http.Client{Transport: remote})}
+	options := httpapi.Options{NativeEvidence: native, Evidence: &evidence.Custody{Storage: storage, Bucket: "synthetic"}, Clock: ticks, Cipher: cipher, Bitbucket: bitbucket.New(&http.Client{Transport: remote})}
 	db, admin := fixtureOptions(t, options)
 	fp := cipher.Fingerprint()
 	if _, e := db.Owner.Exec(context.Background(), `INSERT INTO cosmoformer.crypto_keys(fingerprint,state) VALUES($1,'active')`, fp[:]); e != nil {
@@ -146,13 +159,14 @@ func newPreflightFixture(t *testing.T, requiredTags ...[]string) *preflightFixtu
 	admin.call("POST", base+"/repositories/"+repo+"/source-credentials", map[string]any{"expected_revision": 0, "username": "x-token-auth", "token": "synthetic-repository-only"}, 200)
 	syncResult := admin.call("POST", base+"/repositories/"+repo+"/sync", map[string]any{"expected_revision": 1}, 200)
 	stack := syncResult["stack_ids"].([]any)[0].(string)
-	admin.call("POST", base+"/stacks/"+stack+"/plans", map[string]any{"source": map[string]any{"kind": "branch"}, "priority": "medium"}, 200)
+	admin.call("POST", base+"/stacks/"+stack+"/plans", map[string]any{"source": source, "priority": "medium"}, 200)
 	enrolled := admin.call("POST", base+"/workers", map[string]any{"name": "Synthetic worker", "pool_id": pool, "tags": []string{}}, 200)
 	workerID := enrolled["id"].(string)
 	token := enrolled["token"].(string)
 	admin.call("POST", base+"/workers/"+workerID+"/resume", map[string]any{"expected_revision": 1}, 200)
-	handler, _ := httpapi.NewWithOptions(db.App, origin, options)
-	server := httptest.NewTLSServer(handler)
+	// Use the original API instance for browser reads and worker previews;
+	// another listener must not create another preview store or coordinator.
+	server := httptest.NewTLSServer(admin.handler)
 	t.Cleanup(server.Close)
 	workerHTTP := server.Client()
 	wire := &lossTransport{base: workerHTTP.Transport}

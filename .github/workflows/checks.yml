@@ -19,6 +19,12 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U postgres -d cosmoformer_test_control"
           --health-interval 5s --health-timeout 5s --health-retries 12
+      sonarqube:
+        image: sonarqube:26.11.0.134175-community@sha256:1ce197471f5f2bac347694a336862fd2c23e9f57c6edb46acebbfbe70f2c7d9c
+        env:
+          SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: 'true'
+        ports: ['127.0.0.1:9000:9000']
+        options: --ulimit nofile=65536:65536
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -35,3 +41,7 @@ jobs:
       - run: node scripts/dev.mjs cert
       - run: cd web && npx --no-install playwright install --with-deps chromium firefox
       - run: make check
+      - name: Enforce overall coverage strictly above 80%
+        run: make test-overall-coverage
+        env:
+          COSMOFORMER_SONAR_CONTAINER: ${{ job.services.sonarqube.id }}

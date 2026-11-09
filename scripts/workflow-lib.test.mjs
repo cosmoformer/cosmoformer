@@ -1,4 +1,4 @@
-import {test} from 'node:test';
+import {test, mock} from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync, writeFileSync, readFileSync, chmodSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -55,4 +55,45 @@ test('shutdown kills a descendant that outlives its group leader', async t => {
     const {spawnSync} = await import('node:child_process');
     const state = spawnSync('/bin/ps', ['-p', String(pid), '-o', 'state='], {encoding: 'utf8'}).stdout.trim();
     assert.ok(state === '' || state.startsWith('Z'));
+});
+
+test('health probes reject errors and redirects rather than treating any response as ready', async t => {
+    const {createServer} = await import('node:http');
+    const {healthy} = await import('./workflow-lib.mjs');
+    const server = createServer((request, response) => {
+        if (request.url === '/ready') response.writeHead(200);
+        else if (request.url === '/redirect') response.writeHead(302, {Location: '/ready'});
+        else response.writeHead(503);
+        response.end();
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    t.after(() => server.close());
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    assert.equal(await healthy(origin + '/ready'), true);
+    assert.equal(await healthy(origin + '/error'), false);
+    assert.equal(await healthy(origin + '/redirect'), false);
+    await new Promise(resolve => server.close(resolve));
+    assert.equal(await healthy(origin + '/ready'), false);
+});
+
+test('a missing executable reports failure and can be stopped without a process ID', async () => {
+    const missing = child('/cosmoformer-fixture/executable-does-not-exist', [], {quiet: true});
+    assert.deepEqual(await missing.done, {code: 1, output: 'Required command could not start.'});
+    assert.equal(missing.proc.pid, undefined);
+    await missing.stop();
+});
+
+test('command output is captured privately or forwarded with its session label', async () => {
+    const captured = await child(process.execPath, ['-e', 'process.stdout.write("fixture stdout"); process.stderr.write("fixture stderr");'], {quiet: true}).done;
+    assert.equal(captured.code, 0);
+    assert.match(captured.output, /fixture stdout/);
+    assert.match(captured.output, /fixture stderr/);
+    let forwarded = '';
+    const writer = mock.method(process.stdout, 'write', chunk => { forwarded += chunk; return true; });
+    let result;
+    try {
+        result = await child(process.execPath, ['-e', 'process.stdout.write("fixture output");'], {label: 'fixture'}).done;
+    } finally { writer.mock.restore(); }
+    assert.equal(result.code, 0);
+    assert.equal(forwarded, '[fixture] fixture output');
 });

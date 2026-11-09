@@ -9,9 +9,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/cosmoformer/cosmoformer/internal/worker"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"sync"
 	"testing"
@@ -26,6 +28,7 @@ type evidenceStorage struct {
 	mu       sync.Mutex
 	objects  map[string]string
 	failOnce bool
+	onGet    func() error
 }
 
 func (s *evidenceStorage) Check(context.Context) error { return nil }
@@ -44,6 +47,11 @@ func (s *evidenceStorage) Get(_ context.Context, k, v string) (evidence.Object, 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	b, ok := s.objects[k]
+	if s.onGet != nil {
+		if e := s.onGet(); e != nil {
+			return evidence.Object{}, e
+		}
+	}
 	if !ok || v != "retained" {
 		return evidence.Object{}, evidence.ErrInvalid
 	}
@@ -248,5 +256,80 @@ func TestLogFlushRecoversIncompleteCustody(t *testing.T) {
 	}
 	if e := f.db.Owner.QueryRow(ctx, `SELECT count(*) FROM cosmoformer.artifact_holds WHERE owner_kind='attempt' AND owner_id=$1 AND released_at IS NULL`, p.Assignment.AttemptID).Scan(&holds); e != nil || holds != 3 {
 		t.Fatal("orphan lost custody hold", holds, e)
+	}
+}
+
+func TestArchivePreviewPaginationBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name, archive, preview string
+		limit                  int
+	}{
+		{"exact", "abcd", "ef", 4},
+		{"multibyte", "éé", "界é", 4},
+		{"archive_continuation", "abcdabcd", "efghij", 4},
+		{"multibyte_continuation", "ééé", "界界", 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPreflightFixture(t)
+			ctx := context.Background()
+			if e := f.agent.Admit(ctx); e != nil {
+				t.Fatal(e)
+			}
+			raw := f.workerCall(t, "/poll", runs.Poll{Identity: f.agent.Identity, RequestID: runs.ID(), Wait: 20}, 200)
+			var p struct {
+				Assignment *runs.Assignment `json:"assignment"`
+			}
+			if json.Unmarshal(raw, &p) != nil || p.Assignment == nil {
+				t.Fatal("missing assignment")
+			}
+			a := p.Assignment
+			f.agent.HTTP.Transport = f.wire.base
+			if e := f.agent.ArchiveSegment(ctx, a.AttemptID, runs.ID(), evidence.Segment{Sequence: 0, Start: 0, End: int64(len(tc.archive)), Text: &tc.archive}); e != nil {
+				t.Fatal(e)
+			}
+			f.workerCall(t, "/attempts/"+a.AttemptID+"/log-preview", map[string]any{
+				"stream": "console", "epoch": "synthetic-agent-epoch", "sequence": 1, "byte_start": len(tc.archive), "text": tc.preview,
+			}, 200)
+			cursor, collected := "", ""
+			var offset int64
+			for page := 0; page < 10; page++ {
+				batch := f.admin.call("GET", fmt.Sprintf("/organizations/%s/runs/%s/logs?attempt_id=%s&limit_bytes=%d&cursor=%s", f.org, a.RunID, a.AttemptID, tc.limit, url.QueryEscape(cursor)), nil, 200)
+				segments := batch["segments"].([]any)
+				if len(segments) == 0 {
+					t.Fatal("empty page before completion", batch)
+				}
+				for _, raw := range segments {
+					s := raw.(map[string]any)
+					if int64(s["byte_start"].(float64)) != offset {
+						t.Fatal("duplicated or missing bytes", batch)
+					}
+					text, ok := s["text"].(string)
+					if !ok {
+						t.Fatal("unexpected gap", batch)
+					}
+					collected += text
+					offset += int64(len(text))
+					if int64(s["byte_end"].(float64)) != offset {
+						t.Fatal("invalid byte range", batch)
+					}
+				}
+				next := batch["cursor"].(string)
+				if next == cursor {
+					t.Fatal("cursor did not advance")
+				}
+				cursor = next
+				if batch["has_more"] == false {
+					break
+				}
+			}
+			if collected != tc.archive+tc.preview {
+				t.Fatalf("got %q", collected)
+			}
+			// A continuation at the end is an empty successful page.
+			end := f.admin.call("GET", fmt.Sprintf("/organizations/%s/runs/%s/logs?attempt_id=%s&limit_bytes=%d&cursor=%s", f.org, a.RunID, a.AttemptID, tc.limit, url.QueryEscape(cursor)), nil, 200)
+			if len(end["segments"].([]any)) != 0 || end["has_more"] != false {
+				t.Fatal("end continuation", end)
+			}
+		})
 	}
 }

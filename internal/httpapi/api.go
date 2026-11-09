@@ -37,11 +37,12 @@ func New(s *store.Store, origin string) (http.Handler, huma.API) {
 }
 
 type Options struct {
-	Evidence   *evidence.Custody
-	Clock      clock.Source
-	Bitbucket  *bitbucket.Client
-	Cipher     *cryptostore.Cipher
-	Background context.Context
+	Evidence       *evidence.Custody
+	Clock          clock.Source
+	Bitbucket      *bitbucket.Client
+	Cipher         *cryptostore.Cipher
+	Background     context.Context
+	NativeEvidence coordinator.NativeEvidenceVerifier
 }
 
 func NewWithOptions(s *store.Store, origin string, options Options) (http.Handler, huma.API) {
@@ -53,6 +54,9 @@ func NewWithOptions(s *store.Store, origin string, options Options) (http.Handle
 	}
 	server := &Server{Store: s, Origin: origin, Coordinator: coordinator.New(s, options.Clock), Bitbucket: options.Bitbucket, Cipher: options.Cipher}
 	server.Evidence = options.Evidence
+	server.Coordinator.Evidence = options.Evidence
+	server.Coordinator.NativeEvidence = options.NativeEvidence
+	server.Coordinator.ObserveSource = server.workerSourceObservation
 	server.Previews = evidence.NewPreviews(runs.ID)
 	if s != nil {
 		server.Hasher = identity.NewHasher()

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -48,6 +49,9 @@ func (f *preflightFixture) workerCall(t *testing.T, path string, body any, statu
 	}
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Authorization", "Bearer "+f.token)
+	r.Header.Set("X-Worker-ID", f.agent.Identity.WorkerID)
+	r.Header.Set("X-Worker-Generation", fmt.Sprint(f.agent.Identity.Generation))
+	r.Header.Set("X-Agent-Instance", f.agent.Identity.Agent)
 	client := *f.agent.HTTP
 	client.Transport = f.wire.base
 	response, e := client.Do(r)

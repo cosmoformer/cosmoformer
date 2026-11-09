@@ -30,6 +30,7 @@ const password = "a fictional testing password 2026"
 type client struct {
 	t                 *testing.T
 	base, token, csrf string
+	handler           http.Handler
 }
 
 func (c *client) call(method, path string, body any, status int) map[string]any {
@@ -95,7 +96,7 @@ func fixtureOptions(t *testing.T, options httpapi.Options) (*testsupport.Databas
 	handler, _ := httpapi.NewWithOptions(db.App, origin, options)
 	s := httptest.NewServer(handler)
 	t.Cleanup(s.Close)
-	c := &client{t: t, base: s.URL}
+	c := &client{t: t, base: s.URL, handler: handler}
 	c.login("admin")
 	return db, c
 }
