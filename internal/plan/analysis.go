@@ -298,6 +298,9 @@ func checkSchema(raw []byte, o Options) (verifiedSchema, error) {
 		return out, e
 	}
 	m := obj(v)
+	if !canonicalSchemaFields(m, "format_version", "provider_schemas") {
+		return out, ErrInvalid
+	}
 	if str(m["format_version"]) != "1.0" {
 		return out, ErrUnsupported
 	}
@@ -322,7 +325,7 @@ func checkSchema(raw []byte, o Options) (verifiedSchema, error) {
 		}
 		seen[prov.Address] = true
 		s := obj(schemas[prov.Address])
-		if s == nil || obj(s["provider"]) == nil || !validSchemaItem(obj(s["provider"])) {
+		if !canonicalSchemaFields(s, "provider", "resource_schemas", "data_source_schemas", "ephemeral_resource_schemas", "action_schemas", "functions", "resource_identity_schemas", "list_resource_schemas", "state_store_schemas") || obj(s["provider"]) == nil || !validSchemaItem(obj(s["provider"])) {
 			return out, ErrInvalid
 		}
 		for _, kind := range []string{"resource_schemas", "data_source_schemas"} {
@@ -353,8 +356,25 @@ func checkSchema(raw []byte, o Options) (verifiedSchema, error) {
 	sort.Slice(out.coverage, func(i, j int) bool { return out.coverage[i].Provider < out.coverage[j].Provider })
 	return out, nil
 }
-func validSchemaItem(m map[string]any) bool {
+
+// encoding/json matches struct fields without regard to case. Reject metadata
+// aliases that raw validation would ignore before handing the bytes to it.
+// Resource, attribute and map-label dictionaries remain case-sensitive.
+func canonicalSchemaFields(m map[string]any, fields ...string) bool {
 	if m == nil {
+		return false
+	}
+	for key := range m {
+		for _, field := range fields {
+			if key != field && strings.EqualFold(key, field) {
+				return false
+			}
+		}
+	}
+	return true
+}
+func validSchemaItem(m map[string]any) bool {
+	if !canonicalSchemaFields(m, "version", "block") {
 		return false
 	}
 	n, ok := m["version"].(json.Number)
@@ -369,7 +389,7 @@ func validSchemaItem(m map[string]any) bool {
 	return validBlock(obj(m["block"]))
 }
 func validBlock(b map[string]any) bool {
-	if b == nil {
+	if !canonicalSchemaFields(b, "attributes", "block_types", "description", "description_kind", "deprecated") {
 		return false
 	}
 	names := map[string]bool{}
@@ -392,6 +412,9 @@ func validBlock(b map[string]any) bool {
 				return false
 			}
 			if kind == "block_types" {
+				if !canonicalSchemaFields(item, "nesting_mode", "block", "min_items", "max_items") {
+					return false
+				}
 				mode := str(item["nesting_mode"])
 				if mode != "single" && mode != "list" && mode != "set" && mode != "map" && mode != "group" {
 					return false
@@ -400,12 +423,18 @@ func validBlock(b map[string]any) bool {
 					return false
 				}
 			} else {
+				if !canonicalSchemaFields(item, "type", "nested_type", "description", "description_kind", "deprecated", "required", "optional", "computed", "sensitive", "write_only") {
+					return false
+				}
 				_, hasType := item["type"]
 				nested := obj(item["nested_type"])
 				if hasType == (nested != nil) {
 					return false
 				}
 				if nested != nil {
+					if !canonicalSchemaFields(nested, "attributes", "nesting_mode", "min_items", "max_items") {
+						return false
+					}
 					mode := str(nested["nesting_mode"])
 					if mode != "single" && mode != "list" && mode != "set" && mode != "map" {
 						return false

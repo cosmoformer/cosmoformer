@@ -18,11 +18,23 @@ func TestMapBlockSchemaSensitivity(t *testing.T) {
 	const old = "audit-private-before-6381"
 	const next = "audit-private-after-9472"
 	cases := []struct {
-		name, mode                                string
+		name, mode, alias                         string
 		attr, beforeMarker, afterMarker, register bool
 		wrongArray, overlap                       bool
 	}{
 		{name: "map_block_empty_markers", mode: "map"},
+		{name: "format_metadata_case_alias", mode: "map", alias: "format"},
+		{name: "provider_map_case_alias", mode: "map", alias: "providers"},
+		{name: "provider_case_alias", mode: "map", alias: "provider"},
+		{name: "resource_map_case_alias", mode: "map", alias: "resources"},
+		{name: "schema_item_case_alias", mode: "map", alias: "item"},
+		{name: "attributes_metadata_case_alias", mode: "map", alias: "attributes"},
+		{name: "blocks_metadata_case_alias", mode: "map", alias: "blocks"},
+		{name: "block_nesting_case_alias", mode: "map", alias: "block_mode"},
+		{name: "attribute_type_case_alias", mode: "map", alias: "type"},
+		{name: "sensitive_metadata_case_alias", mode: "map", alias: "sensitive"},
+		{name: "sensitive_metadata_unicode_case_alias", mode: "map", alias: "unicode"},
+		{name: "nested_attribute_case_alias", mode: "map", attr: true, alias: "nested_mode"},
 		{name: "attribute_block_name_overlap", mode: "single", overlap: true},
 		{name: "map_block_rejects_array", mode: "map", wrongArray: true},
 		{name: "map_attribute_rejects_array", mode: "map", attr: true, wrongArray: true},
@@ -40,7 +52,7 @@ func TestMapBlockSchemaSensitivity(t *testing.T) {
 			// Disable schema sensitivity in native-marker/registry controls so each
 			// preventing layer must work independently.
 			sensitive := !tc.beforeMarker && !tc.afterMarker && !tc.register && !tc.overlap
-			attrs := map[string]any{"private": map[string]any{"type": "string", "sensitive": sensitive}, "safe": map[string]any{"type": "string"}}
+			attrs := map[string]any{"private": map[string]any{"type": "string", "sensitive": sensitive}, "safe": map[string]any{"type": "string"}, "Private": map[string]any{"type": "string"}}
 			block := map[string]any{}
 			if tc.attr {
 				block["attributes"] = map[string]any{"items": map[string]any{"optional": true, "nested_type": map[string]any{"nesting_mode": tc.mode, "attributes": attrs}}}
@@ -49,11 +61,40 @@ func TestMapBlockSchemaSensitivity(t *testing.T) {
 			}
 			if tc.overlap {
 				block["attributes"] = map[string]any{"items": map[string]any{
-					"type":      []any{"object", map[string]any{"private": "string", "safe": "string"}},
+					"type":      []any{"object", map[string]any{"private": "string", "safe": "string", "Private": "string"}},
 					"sensitive": true,
 				}}
 			}
-			schema, err := json.Marshal(map[string]any{"format_version": "1.0", "provider_schemas": map[string]any{provider: map[string]any{"provider": map[string]any{"version": 0, "block": map[string]any{}}, "resource_schemas": map[string]any{"nested_item": map[string]any{"version": 0, "block": block}}}}})
+			resourceSchema := map[string]any{"version": 0, "block": block}
+			providerSchema := map[string]any{"provider": map[string]any{"version": 0, "block": map[string]any{}}, "resource_schemas": map[string]any{"nested_item": resourceSchema}}
+			schemaInput := map[string]any{"format_version": "1.0", "provider_schemas": map[string]any{provider: providerSchema}}
+			switch tc.alias {
+			case "format":
+				schemaInput["FORMAT_VERSION"] = "1.0"
+			case "providers":
+				schemaInput["PROVIDER_SCHEMAS"] = schemaInput["provider_schemas"]
+			case "provider":
+				providerSchema["PROVIDER"] = providerSchema["provider"]
+			case "resources":
+				providerSchema["RESOURCE_SCHEMAS"] = providerSchema["resource_schemas"]
+			case "item":
+				resourceSchema["BLOCK"] = block
+			case "attributes":
+				block["ATTRIBUTES"] = map[string]any{"extra": map[string]any{"type": "string"}}
+			case "blocks":
+				block["BLOCK_TYPES"] = block["block_types"]
+			case "block_mode":
+				block["block_types"].(map[string]any)["items"].(map[string]any)["NESTING_MODE"] = "map"
+			case "type":
+				attrs["private"].(map[string]any)["TYPE"] = "string"
+			case "sensitive":
+				attrs["private"].(map[string]any)["SENSITIVE"] = false
+			case "unicode":
+				attrs["private"].(map[string]any)["ſensitive"] = false
+			case "nested_mode":
+				block["attributes"].(map[string]any)["items"].(map[string]any)["nested_type"].(map[string]any)["NESTING_MODE"] = "map"
+			}
+			schema, err := json.Marshal(schemaInput)
 			if err != nil {
 				t.Fatal("schema encoding")
 			}
@@ -63,15 +104,15 @@ func TestMapBlockSchemaSensitivity(t *testing.T) {
 				}
 				switch tc.mode {
 				case "map":
-					return map[string]any{"slot": value, "other": value}
+					return map[string]any{"slot": value, "Slot": value, "other": value}
 				case "list", "set":
 					return []any{value}
 				default:
 					return value
 				}
 			}
-			before := map[string]any{"items": wrap(map[string]any{"private": old, "safe": "visible"})}
-			after := map[string]any{"items": wrap(map[string]any{"private": next, "safe": "visible"})}
+			before := map[string]any{"items": wrap(map[string]any{"private": old, "safe": "visible", "Private": "case-visible"})}
+			after := map[string]any{"items": wrap(map[string]any{"private": next, "safe": "visible", "Private": "case-visible"})}
 			bs, as := map[string]any{}, map[string]any{}
 			if tc.beforeMarker {
 				bs["items"] = wrap(map[string]any{"private": true})
@@ -90,7 +131,7 @@ func TestMapBlockSchemaSensitivity(t *testing.T) {
 				}
 			}
 			out, err := plan.Analyze(raw, schema, plan.Options{Engine: "opentofu", Version: "1.13.8", ProfileID: plan.ProfileID("opentofu"), Providers: []runs.Provider{{Address: provider, Version: "1.0.0", Platform: "linux_amd64", Hashes: []string{"h1:fixture"}}}, ResourceIDs: map[string]string{addr: "11111111-1111-4111-8111-111111111111"}, Secrets: reg})
-			if tc.wrongArray || tc.overlap {
+			if tc.wrongArray || tc.overlap || tc.alias != "" {
 				if err == nil || out != nil {
 					t.Fatal("ambiguous schema or mismatched native collection accepted")
 				}
@@ -124,13 +165,13 @@ func TestMapBlockSchemaSensitivity(t *testing.T) {
 					if side.State != "known" {
 						t.Fatal("map container hidden unnecessarily")
 					}
-					for _, label := range []string{"slot", "other"} {
+					for _, label := range []string{"slot", "Slot", "other"} {
 						child := side.Value.(map[string]plan.Value)[label]
 						if child.State != "known" {
 							t.Fatal("map child or safe sibling hidden unnecessarily")
 						}
 						fields := child.Value.(map[string]plan.Value)
-						if fields["private"].State != "hidden" || fields["safe"].State != "known" || fields["safe"].Value != "visible" {
+						if fields["private"].State != "hidden" || fields["safe"].State != "known" || fields["safe"].Value != "visible" || fields["Private"].State != "known" || fields["Private"].Value != "case-visible" {
 							t.Fatal("map child lost sensitivity or safe sibling")
 						}
 					}
