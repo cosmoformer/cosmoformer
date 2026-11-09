@@ -441,3 +441,15 @@ func TestTruncatedMultipartUploadAbortsItsOwnUpload(t *testing.T) {
 		t.Fatal("incomplete multipart was not aborted", e, aborted)
 	}
 }
+
+func TestJSONSecretLeafCapacityCountsDistinctTerms(t *testing.T) {
+	value := "[" + strings.Repeat("0,", 4095) + "0]"
+	terms, e := SecretTerms(value, true)
+	if e != nil || len(terms) != 2 {
+		t.Fatal("duplicate JSON leaves consumed registry capacity")
+	}
+	r := &Registry{}
+	if r.Register(terms...) != nil || !r.Contains("0") {
+		t.Fatal("canonical leaf missing")
+	}
+}

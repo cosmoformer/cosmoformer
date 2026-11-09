@@ -1,0 +1,6253 @@
+{
+  "version": 1,
+  "scope": "Synthetic only; selected schema shapes are extracted separately from the offline harness.",
+  "cases": [
+    {
+      "name": "aws_db_instance deletion_protection weakened",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "deletion_protection": true
+              },
+              "after": {
+                "deletion_protection": false
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-RDS-PROTECTION",
+          "severity": "critical"
+        }
+      ]
+    },
+    {
+      "name": "aws_db_instance deletion_protection strengthened",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "deletion_protection": false
+              },
+              "after": {
+                "deletion_protection": true
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_db_instance deletion_protection unchanged",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "deletion_protection": true,
+                "tags": {
+                  "x": "old"
+                }
+              },
+              "after": {
+                "deletion_protection": true,
+                "tags": {
+                  "x": "new"
+                }
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_db_instance deletion_protection create absent",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "create"
+              ],
+              "before": null,
+              "after": {
+                "deletion_protection": false
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_db_instance deletion_protection null",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "deletion_protection": null
+              },
+              "after": {
+                "deletion_protection": false
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_db_instance deletion_protection absent",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {},
+              "after": {
+                "deletion_protection": false
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_db_instance deletion_protection unknown",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "deletion_protection": true
+              },
+              "after": {},
+              "after_unknown": {
+                "deletion_protection": true
+              },
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-RDS-PROTECTION",
+          "severity": "attention",
+          "message_code": "SAFETY_SETTING_UNCERTAIN"
+        }
+      ]
+    },
+    {
+      "name": "aws_db_instance deletion_protection hidden",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "deletion_protection": true
+              },
+              "after": {
+                "deletion_protection": false
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {
+                "deletion_protection": true
+              }
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-RDS-PROTECTION",
+          "severity": "attention",
+          "message_code": "SAFETY_SETTING_UNCERTAIN"
+        }
+      ]
+    },
+    {
+      "name": "aws_rds_cluster deletion_protection weakened",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_rds_cluster.fixture",
+            "mode": "managed",
+            "type": "aws_rds_cluster",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "deletion_protection": true
+              },
+              "after": {
+                "deletion_protection": false
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-RDS-PROTECTION",
+          "severity": "critical"
+        }
+      ]
+    },
+    {
+      "name": "aws_rds_cluster deletion_protection strengthened",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_rds_cluster.fixture",
+            "mode": "managed",
+            "type": "aws_rds_cluster",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "deletion_protection": false
+              },
+              "after": {
+                "deletion_protection": true
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_rds_cluster deletion_protection unchanged",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_rds_cluster.fixture",
+            "mode": "managed",
+            "type": "aws_rds_cluster",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "deletion_protection": true,
+                "tags": {
+                  "x": "old"
+                }
+              },
+              "after": {
+                "deletion_protection": true,
+                "tags": {
+                  "x": "new"
+                }
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_rds_cluster deletion_protection create absent",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_rds_cluster.fixture",
+            "mode": "managed",
+            "type": "aws_rds_cluster",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "create"
+              ],
+              "before": null,
+              "after": {
+                "deletion_protection": false
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_rds_cluster deletion_protection null",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_rds_cluster.fixture",
+            "mode": "managed",
+            "type": "aws_rds_cluster",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "deletion_protection": null
+              },
+              "after": {
+                "deletion_protection": false
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_rds_cluster deletion_protection absent",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_rds_cluster.fixture",
+            "mode": "managed",
+            "type": "aws_rds_cluster",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {},
+              "after": {
+                "deletion_protection": false
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_rds_cluster deletion_protection unknown",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_rds_cluster.fixture",
+            "mode": "managed",
+            "type": "aws_rds_cluster",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "deletion_protection": true
+              },
+              "after": {},
+              "after_unknown": {
+                "deletion_protection": true
+              },
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-RDS-PROTECTION",
+          "severity": "attention",
+          "message_code": "SAFETY_SETTING_UNCERTAIN"
+        }
+      ]
+    },
+    {
+      "name": "aws_rds_cluster deletion_protection hidden",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_rds_cluster.fixture",
+            "mode": "managed",
+            "type": "aws_rds_cluster",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "deletion_protection": true
+              },
+              "after": {
+                "deletion_protection": false
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {
+                "deletion_protection": true
+              }
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-RDS-PROTECTION",
+          "severity": "attention",
+          "message_code": "SAFETY_SETTING_UNCERTAIN"
+        }
+      ]
+    },
+    {
+      "name": "aws_db_instance backup_retention_period weakened",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "backup_retention_period": 7
+              },
+              "after": {
+                "backup_retention_period": 3
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-RDS-BACKUP",
+          "severity": "critical"
+        }
+      ]
+    },
+    {
+      "name": "aws_db_instance backup_retention_period strengthened",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "backup_retention_period": 3
+              },
+              "after": {
+                "backup_retention_period": 7
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_db_instance backup_retention_period unchanged",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "backup_retention_period": 7,
+                "tags": {
+                  "x": "old"
+                }
+              },
+              "after": {
+                "backup_retention_period": 7,
+                "tags": {
+                  "x": "new"
+                }
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_db_instance backup_retention_period create absent",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "create"
+              ],
+              "before": null,
+              "after": {
+                "backup_retention_period": 3
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_db_instance backup_retention_period null",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "backup_retention_period": null
+              },
+              "after": {
+                "backup_retention_period": 3
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_db_instance backup_retention_period absent",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {},
+              "after": {
+                "backup_retention_period": 3
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_db_instance backup_retention_period unknown",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "backup_retention_period": 7
+              },
+              "after": {},
+              "after_unknown": {
+                "backup_retention_period": true
+              },
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-RDS-BACKUP",
+          "severity": "attention",
+          "message_code": "SAFETY_SETTING_UNCERTAIN"
+        }
+      ]
+    },
+    {
+      "name": "aws_db_instance backup_retention_period hidden",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "backup_retention_period": 7
+              },
+              "after": {
+                "backup_retention_period": 3
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {
+                "backup_retention_period": true
+              }
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-RDS-BACKUP",
+          "severity": "attention",
+          "message_code": "SAFETY_SETTING_UNCERTAIN"
+        }
+      ]
+    },
+    {
+      "name": "aws_rds_cluster backup_retention_period weakened",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_rds_cluster.fixture",
+            "mode": "managed",
+            "type": "aws_rds_cluster",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "backup_retention_period": 7
+              },
+              "after": {
+                "backup_retention_period": 3
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-RDS-BACKUP",
+          "severity": "critical"
+        }
+      ]
+    },
+    {
+      "name": "aws_rds_cluster backup_retention_period strengthened",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_rds_cluster.fixture",
+            "mode": "managed",
+            "type": "aws_rds_cluster",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "backup_retention_period": 3
+              },
+              "after": {
+                "backup_retention_period": 7
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_rds_cluster backup_retention_period unchanged",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_rds_cluster.fixture",
+            "mode": "managed",
+            "type": "aws_rds_cluster",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "backup_retention_period": 7,
+                "tags": {
+                  "x": "old"
+                }
+              },
+              "after": {
+                "backup_retention_period": 7,
+                "tags": {
+                  "x": "new"
+                }
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_rds_cluster backup_retention_period create absent",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_rds_cluster.fixture",
+            "mode": "managed",
+            "type": "aws_rds_cluster",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "create"
+              ],
+              "before": null,
+              "after": {
+                "backup_retention_period": 3
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_rds_cluster backup_retention_period null",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_rds_cluster.fixture",
+            "mode": "managed",
+            "type": "aws_rds_cluster",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "backup_retention_period": null
+              },
+              "after": {
+                "backup_retention_period": 3
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_rds_cluster backup_retention_period absent",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_rds_cluster.fixture",
+            "mode": "managed",
+            "type": "aws_rds_cluster",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {},
+              "after": {
+                "backup_retention_period": 3
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_rds_cluster backup_retention_period unknown",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_rds_cluster.fixture",
+            "mode": "managed",
+            "type": "aws_rds_cluster",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "backup_retention_period": 7
+              },
+              "after": {},
+              "after_unknown": {
+                "backup_retention_period": true
+              },
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-RDS-BACKUP",
+          "severity": "attention",
+          "message_code": "SAFETY_SETTING_UNCERTAIN"
+        }
+      ]
+    },
+    {
+      "name": "aws_rds_cluster backup_retention_period hidden",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_rds_cluster.fixture",
+            "mode": "managed",
+            "type": "aws_rds_cluster",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "backup_retention_period": 7
+              },
+              "after": {
+                "backup_retention_period": 3
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {
+                "backup_retention_period": true
+              }
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-RDS-BACKUP",
+          "severity": "attention",
+          "message_code": "SAFETY_SETTING_UNCERTAIN"
+        }
+      ]
+    },
+    {
+      "name": "aws_db_instance publicly_accessible weakened",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "publicly_accessible": false
+              },
+              "after": {
+                "publicly_accessible": true
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-RDS-PUBLIC",
+          "severity": "high"
+        }
+      ]
+    },
+    {
+      "name": "aws_db_instance publicly_accessible strengthened",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "publicly_accessible": true
+              },
+              "after": {
+                "publicly_accessible": false
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_db_instance publicly_accessible unchanged",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "publicly_accessible": false,
+                "tags": {
+                  "x": "old"
+                }
+              },
+              "after": {
+                "publicly_accessible": false,
+                "tags": {
+                  "x": "new"
+                }
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_db_instance publicly_accessible create absent",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "create"
+              ],
+              "before": null,
+              "after": {
+                "publicly_accessible": true
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_db_instance publicly_accessible null",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "publicly_accessible": null
+              },
+              "after": {
+                "publicly_accessible": true
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_db_instance publicly_accessible absent",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {},
+              "after": {
+                "publicly_accessible": true
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "aws_db_instance publicly_accessible unknown",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "publicly_accessible": false
+              },
+              "after": {},
+              "after_unknown": {
+                "publicly_accessible": true
+              },
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-RDS-PUBLIC",
+          "severity": "attention",
+          "message_code": "SAFETY_SETTING_UNCERTAIN"
+        }
+      ]
+    },
+    {
+      "name": "aws_db_instance publicly_accessible hidden",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "publicly_accessible": false
+              },
+              "after": {
+                "publicly_accessible": true
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {
+                "publicly_accessible": true
+              }
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-RDS-PUBLIC",
+          "severity": "attention",
+          "message_code": "SAFETY_SETTING_UNCERTAIN"
+        }
+      ]
+    },
+    {
+      "name": "aws_db_instance deletion",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "delete"
+              ],
+              "before": {},
+              "after": null,
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-ACTION-DELETE",
+          "severity": "critical"
+        }
+      ]
+    },
+    {
+      "name": "aws_db_instance replacement destroy_then_create",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "delete",
+                "create"
+              ],
+              "before": {},
+              "after": {},
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {},
+              "replace_paths": [
+                [
+                  "tags",
+                  "key"
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-ACTION-REPLACE",
+          "severity": "critical"
+        }
+      ],
+      "replacement_order": "destroy_then_create"
+    },
+    {
+      "name": "aws_db_instance replacement create_then_destroy",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "create",
+                "delete"
+              ],
+              "before": {},
+              "after": {},
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {},
+              "replace_paths": [
+                [
+                  "tags",
+                  "key"
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-ACTION-REPLACE",
+          "severity": "critical"
+        }
+      ],
+      "replacement_order": "create_then_destroy"
+    },
+    {
+      "name": "aws_rds_cluster deletion",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_rds_cluster.fixture",
+            "mode": "managed",
+            "type": "aws_rds_cluster",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "delete"
+              ],
+              "before": {},
+              "after": null,
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-ACTION-DELETE",
+          "severity": "critical"
+        }
+      ]
+    },
+    {
+      "name": "aws_rds_cluster replacement destroy_then_create",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_rds_cluster.fixture",
+            "mode": "managed",
+            "type": "aws_rds_cluster",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "delete",
+                "create"
+              ],
+              "before": {},
+              "after": {},
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {},
+              "replace_paths": [
+                [
+                  "tags",
+                  "key"
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-ACTION-REPLACE",
+          "severity": "critical"
+        }
+      ],
+      "replacement_order": "destroy_then_create"
+    },
+    {
+      "name": "aws_rds_cluster replacement create_then_destroy",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_rds_cluster.fixture",
+            "mode": "managed",
+            "type": "aws_rds_cluster",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "create",
+                "delete"
+              ],
+              "before": {},
+              "after": {},
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {},
+              "replace_paths": [
+                [
+                  "tags",
+                  "key"
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-ACTION-REPLACE",
+          "severity": "critical"
+        }
+      ],
+      "replacement_order": "create_then_destroy"
+    },
+    {
+      "name": "aws_route_table deletion",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_route_table.fixture",
+            "mode": "managed",
+            "type": "aws_route_table",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "delete"
+              ],
+              "before": {},
+              "after": null,
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-ACTION-DELETE",
+          "severity": "high"
+        }
+      ],
+      "error": true
+    },
+    {
+      "name": "aws_route_table replacement destroy_then_create",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_route_table.fixture",
+            "mode": "managed",
+            "type": "aws_route_table",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "delete",
+                "create"
+              ],
+              "before": {},
+              "after": {},
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {},
+              "replace_paths": [
+                [
+                  "tags",
+                  "key"
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-ACTION-REPLACE",
+          "severity": "high"
+        }
+      ],
+      "replacement_order": "destroy_then_create",
+      "error": true
+    },
+    {
+      "name": "aws_route_table replacement create_then_destroy",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_route_table.fixture",
+            "mode": "managed",
+            "type": "aws_route_table",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "create",
+                "delete"
+              ],
+              "before": {},
+              "after": {},
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {},
+              "replace_paths": [
+                [
+                  "tags",
+                  "key"
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-ACTION-REPLACE",
+          "severity": "high"
+        }
+      ],
+      "replacement_order": "create_then_destroy",
+      "error": true
+    },
+    {
+      "name": "SG CIDR widened",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group.fixture",
+            "mode": "managed",
+            "type": "aws_security_group",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "0.0.0.0/0"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-SG-INGRESS",
+          "severity": "high",
+          "message_code": "INGRESS_ADDED_OR_POTENTIALLY_WIDENED"
+        }
+      ]
+    },
+    {
+      "name": "SG CIDR tightened",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group.fixture",
+            "mode": "managed",
+            "type": "aws_security_group",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "0.0.0.0/0"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-SG-INGRESS",
+          "severity": "attention",
+          "message_code": "INGRESS_REMOVED_OR_POTENTIALLY_TIGHTENED"
+        }
+      ]
+    },
+    {
+      "name": "SG reordered",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group.fixture",
+            "mode": "managed",
+            "type": "aws_security_group",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 80,
+                    "to_port": 80,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  },
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  },
+                  {
+                    "protocol": "tcp",
+                    "from_port": 80,
+                    "to_port": 80,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "SG duplicate443",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group.fixture",
+            "mode": "managed",
+            "type": "aws_security_group",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  },
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "SG merge adjacent intervals",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group.fixture",
+            "mode": "managed",
+            "type": "aws_security_group",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 80,
+                    "to_port": 90,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  },
+                  {
+                    "protocol": "tcp",
+                    "from_port": 91,
+                    "to_port": 100,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 80,
+                    "to_port": 100,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "SG merge overlapping intervals",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group.fixture",
+            "mode": "managed",
+            "type": "aws_security_group",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 80,
+                    "to_port": 95,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  },
+                  {
+                    "protocol": "tcp",
+                    "from_port": 90,
+                    "to_port": 100,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 80,
+                    "to_port": 100,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "SG conservative regroup two /25 to /24",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group.fixture",
+            "mode": "managed",
+            "type": "aws_security_group",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "10.0.0.0/25"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  },
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "10.0.0.128/25"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-SG-INGRESS",
+          "severity": "high",
+          "message_code": "INGRESS_ADDED_OR_POTENTIALLY_WIDENED"
+        }
+      ]
+    },
+    {
+      "name": "SG separate IPv4 and IPv6",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group.fixture",
+            "mode": "managed",
+            "type": "aws_security_group",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [],
+                    "ipv6_cidr_blocks": [
+                      "::/0"
+                    ],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-SG-INGRESS",
+          "severity": "high",
+          "message_code": "INGRESS_ADDED_OR_POTENTIALLY_WIDENED"
+        },
+        {
+          "rule_id": "CF-SG-INGRESS",
+          "severity": "attention",
+          "message_code": "INGRESS_REMOVED_OR_POTENTIALLY_TIGHTENED"
+        }
+      ]
+    },
+    {
+      "name": "SG canonical network host bits",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group.fixture",
+            "mode": "managed",
+            "type": "aws_security_group",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "10.0.0.17/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "SG peer SG-A to SG-B",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group.fixture",
+            "mode": "managed",
+            "type": "aws_security_group",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [
+                      "sg-A"
+                    ],
+                    "self": false
+                  }
+                ]
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [
+                      "sg-B"
+                    ],
+                    "self": false
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-SG-INGRESS",
+          "severity": "high",
+          "message_code": "INGRESS_ADDED_OR_POTENTIALLY_WIDENED"
+        },
+        {
+          "rule_id": "CF-SG-INGRESS",
+          "severity": "attention",
+          "message_code": "INGRESS_REMOVED_OR_POTENTIALLY_TIGHTENED"
+        }
+      ]
+    },
+    {
+      "name": "SG prefix identity change",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group.fixture",
+            "mode": "managed",
+            "type": "aws_security_group",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [
+                      "pl-A"
+                    ],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [
+                      "pl-B"
+                    ],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-SG-INGRESS",
+          "severity": "high",
+          "message_code": "INGRESS_ADDED_OR_POTENTIALLY_WIDENED"
+        },
+        {
+          "rule_id": "CF-SG-INGRESS",
+          "severity": "attention",
+          "message_code": "INGRESS_REMOVED_OR_POTENTIALLY_TIGHTENED"
+        }
+      ]
+    },
+    {
+      "name": "SG self unchanged",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group.fixture",
+            "mode": "managed",
+            "type": "aws_security_group",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": true
+                  }
+                ]
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": true
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "SG all protocol covers TCP",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group.fixture",
+            "mode": "managed",
+            "type": "aws_security_group",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "protocol": "-1",
+                    "from_port": -1,
+                    "to_port": -1,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-SG-INGRESS",
+          "severity": "attention",
+          "message_code": "INGRESS_REMOVED_OR_POTENTIALLY_TIGHTENED"
+        }
+      ]
+    },
+    {
+      "name": "SG numeric TCP identity",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group.fixture",
+            "mode": "managed",
+            "type": "aws_security_group",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "protocol": "6",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "SG ICMP wildcard covers exact",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group.fixture",
+            "mode": "managed",
+            "type": "aws_security_group",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "protocol": "icmp",
+                    "from_port": -1,
+                    "to_port": -1,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "protocol": "1",
+                    "from_port": 8,
+                    "to_port": 0,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-SG-INGRESS",
+          "severity": "attention",
+          "message_code": "INGRESS_REMOVED_OR_POTENTIALLY_TIGHTENED"
+        }
+      ]
+    },
+    {
+      "name": "SG other protocol ignores port meaning",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group.fixture",
+            "mode": "managed",
+            "type": "aws_security_group",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "protocol": "50",
+                    "from_port": null,
+                    "to_port": null,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "protocol": "50",
+                    "from_port": null,
+                    "to_port": null,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "SG empty peers does not mean internet",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group.fixture",
+            "mode": "managed",
+            "type": "aws_security_group",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "SG unknown peer",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group.fixture",
+            "mode": "managed",
+            "type": "aws_security_group",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after_unknown": {
+                "ingress": [
+                  {
+                    "cidr_blocks": true
+                  }
+                ]
+              },
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-SG-INGRESS",
+          "severity": "high",
+          "message_code": "INGRESS_COVERAGE_UNCERTAIN"
+        }
+      ]
+    },
+    {
+      "name": "SG hidden protocol",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group.fixture",
+            "mode": "managed",
+            "type": "aws_security_group",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {
+                "ingress": [
+                  {
+                    "protocol": true
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-SG-INGRESS",
+          "severity": "high",
+          "message_code": "INGRESS_COVERAGE_UNCERTAIN"
+        }
+      ]
+    },
+    {
+      "name": "SG missing required ports",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group.fixture",
+            "mode": "managed",
+            "type": "aws_security_group",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "cidr_blocks": [
+                      "0.0.0.0/0"
+                    ]
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "error": true
+    },
+    {
+      "name": "SG invalid CIDR",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group.fixture",
+            "mode": "managed",
+            "type": "aws_security_group",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "bad"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "error": true
+    },
+    {
+      "name": "SG invalid TCP interval",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group.fixture",
+            "mode": "managed",
+            "type": "aws_security_group",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 100,
+                    "to_port": 80,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "error": true
+    },
+    {
+      "name": "SG invalid numeric protocol",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group.fixture",
+            "mode": "managed",
+            "type": "aws_security_group",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "protocol": "256",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [
+                      "10.0.0.0/24"
+                    ],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [],
+                    "self": false
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "error": true
+    },
+    {
+      "name": "SG standalone equivalent",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group_rule.fixture",
+            "mode": "managed",
+            "type": "aws_security_group_rule",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "protocol": "tcp",
+                "from_port": 443,
+                "to_port": 443,
+                "cidr_blocks": [
+                  "10.0.0.0/24"
+                ],
+                "ipv6_cidr_blocks": [],
+                "prefix_list_ids": [],
+                "self": false,
+                "source_security_group_id": null,
+                "type": "ingress"
+              },
+              "after": {
+                "protocol": "tcp",
+                "from_port": 443,
+                "to_port": 443,
+                "cidr_blocks": [
+                  "0.0.0.0/0"
+                ],
+                "ipv6_cidr_blocks": [],
+                "prefix_list_ids": [],
+                "self": false,
+                "source_security_group_id": null,
+                "type": "ingress"
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-SG-INGRESS",
+          "severity": "high",
+          "message_code": "INGRESS_ADDED_OR_POTENTIALLY_WIDENED"
+        }
+      ]
+    },
+    {
+      "name": "SG egress standalone excluded",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group_rule.fixture",
+            "mode": "managed",
+            "type": "aws_security_group_rule",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "protocol": "tcp",
+                "from_port": 443,
+                "to_port": 443,
+                "cidr_blocks": [
+                  "10.0.0.0/24"
+                ],
+                "ipv6_cidr_blocks": [],
+                "prefix_list_ids": [],
+                "self": false,
+                "source_security_group_id": null,
+                "type": "egress"
+              },
+              "after": {
+                "protocol": "tcp",
+                "from_port": 443,
+                "to_port": 443,
+                "cidr_blocks": [
+                  "0.0.0.0/0"
+                ],
+                "ipv6_cidr_blocks": [],
+                "prefix_list_ids": [],
+                "self": false,
+                "source_security_group_id": null,
+                "type": "egress"
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "SG vpc ingress standalone",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_vpc_security_group_ingress_rule.fixture",
+            "mode": "managed",
+            "type": "aws_vpc_security_group_ingress_rule",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ip_protocol": "tcp",
+                "from_port": 443,
+                "to_port": 443,
+                "cidr_ipv4": "10.0.0.0/24"
+              },
+              "after": {
+                "ip_protocol": "tcp",
+                "from_port": 443,
+                "to_port": 443,
+                "cidr_ipv4": "0.0.0.0/0"
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-SG-INGRESS",
+          "severity": "high",
+          "message_code": "INGRESS_ADDED_OR_POTENTIALLY_WIDENED"
+        }
+      ]
+    },
+    {
+      "name": "SG vpc multiple peers rejected",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_vpc_security_group_ingress_rule.fixture",
+            "mode": "managed",
+            "type": "aws_vpc_security_group_ingress_rule",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ip_protocol": "tcp",
+                "from_port": 443,
+                "to_port": 443,
+                "cidr_ipv4": "10.0.0.0/24"
+              },
+              "after": {
+                "ip_protocol": "tcp",
+                "from_port": 443,
+                "to_port": 443,
+                "cidr_ipv4": "0.0.0.0/0",
+                "cidr_ipv6": "::/0"
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "error": true
+    },
+    {
+      "name": "Route target changed",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_route.fixture",
+            "mode": "managed",
+            "type": "aws_route",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "destination_cidr_block": "10.0.0.0/24",
+                "gateway_id": "igw-a"
+              },
+              "after": {
+                "destination_cidr_block": "10.0.0.0/24",
+                "gateway_id": "igw-b"
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-VPC-ROUTE",
+          "severity": "high",
+          "message_code": "ROUTE_TARGET_CHANGED"
+        }
+      ]
+    },
+    {
+      "name": "Route inline reordered",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_route_table.fixture",
+            "mode": "managed",
+            "type": "aws_route_table",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "route": [
+                  {
+                    "cidr_block": "10.0.0.0/24",
+                    "nat_gateway_id": "nat-a"
+                  },
+                  {
+                    "cidr_block": "10.1.0.0/24",
+                    "nat_gateway_id": "nat-a"
+                  }
+                ]
+              },
+              "after": {
+                "route": [
+                  {
+                    "cidr_block": "10.1.0.0/24",
+                    "nat_gateway_id": "nat-a"
+                  },
+                  {
+                    "cidr_block": "10.0.0.0/24",
+                    "nat_gateway_id": "nat-a"
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "Route inline duplicate exact",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_route_table.fixture",
+            "mode": "managed",
+            "type": "aws_route_table",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "route": [
+                  {
+                    "cidr_block": "10.0.0.0/24",
+                    "nat_gateway_id": "nat-a"
+                  }
+                ]
+              },
+              "after": {
+                "route": [
+                  {
+                    "cidr_block": "10.0.0.0/24",
+                    "nat_gateway_id": "nat-a"
+                  },
+                  {
+                    "cidr_block": "10.0.0.0/24",
+                    "nat_gateway_id": "nat-a"
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "Route conflicting duplicate",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_route_table.fixture",
+            "mode": "managed",
+            "type": "aws_route_table",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "route": [
+                  {
+                    "cidr_block": "10.0.0.0/24",
+                    "nat_gateway_id": "nat-a"
+                  }
+                ]
+              },
+              "after": {
+                "route": [
+                  {
+                    "cidr_block": "10.0.0.0/24",
+                    "nat_gateway_id": "nat-a"
+                  },
+                  {
+                    "cidr_block": "10.0.0.0/24",
+                    "nat_gateway_id": "nat-b"
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "error": true
+    },
+    {
+      "name": "Route destination changed",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_route_table.fixture",
+            "mode": "managed",
+            "type": "aws_route_table",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "route": [
+                  {
+                    "cidr_block": "10.0.0.0/24",
+                    "nat_gateway_id": "nat-a"
+                  }
+                ]
+              },
+              "after": {
+                "route": [
+                  {
+                    "cidr_block": "10.1.0.0/24",
+                    "nat_gateway_id": "nat-a"
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-VPC-ROUTE",
+          "severity": "high"
+        }
+      ]
+    },
+    {
+      "name": "Route tags only",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_route_table.fixture",
+            "mode": "managed",
+            "type": "aws_route_table",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "route": [
+                  {
+                    "cidr_block": "10.0.0.0/24",
+                    "nat_gateway_id": "nat-a"
+                  }
+                ],
+                "tags": {
+                  "x": "old"
+                }
+              },
+              "after": {
+                "route": [
+                  {
+                    "cidr_block": "10.0.0.0/24",
+                    "nat_gateway_id": "nat-a"
+                  }
+                ],
+                "tags": {
+                  "x": "new"
+                }
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "Route IPv6 canonical",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_route.fixture",
+            "mode": "managed",
+            "type": "aws_route",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "destination_ipv6_cidr_block": "2001:db8::1/64",
+                "gateway_id": "igw-a"
+              },
+              "after": {
+                "destination_ipv6_cidr_block": "2001:db8::/64",
+                "gateway_id": "igw-a"
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "Route prefix target changed",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_route.fixture",
+            "mode": "managed",
+            "type": "aws_route",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "destination_prefix_list_id": "pl-fixture",
+                "gateway_id": "igw-a"
+              },
+              "after": {
+                "destination_prefix_list_id": "pl-fixture",
+                "gateway_id": "igw-b"
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-VPC-ROUTE",
+          "severity": "high"
+        }
+      ]
+    },
+    {
+      "name": "Route unknown target",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_route_table.fixture",
+            "mode": "managed",
+            "type": "aws_route_table",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "route": [
+                  {
+                    "cidr_block": "10.0.0.0/24",
+                    "nat_gateway_id": "nat-a"
+                  }
+                ]
+              },
+              "after": {
+                "route": [
+                  {
+                    "cidr_block": "10.0.0.0/24"
+                  }
+                ]
+              },
+              "after_unknown": {
+                "route": [
+                  {
+                    "nat_gateway_id": true
+                  }
+                ]
+              },
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-VPC-ROUTE",
+          "severity": "high",
+          "message_code": "ROUTE_COVERAGE_UNCERTAIN"
+        }
+      ]
+    },
+    {
+      "name": "Route hidden destination",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_route_table.fixture",
+            "mode": "managed",
+            "type": "aws_route_table",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "route": [
+                  {
+                    "cidr_block": "10.0.0.0/24",
+                    "nat_gateway_id": "nat-a"
+                  }
+                ]
+              },
+              "after": {
+                "route": [
+                  {
+                    "cidr_block": "10.0.0.0/24",
+                    "nat_gateway_id": "nat-a"
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {
+                "route": [
+                  {
+                    "cidr_block": true
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-VPC-ROUTE",
+          "severity": "high",
+          "message_code": "ROUTE_COVERAGE_UNCERTAIN"
+        }
+      ]
+    },
+    {
+      "name": "Route multiple targets",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_route.fixture",
+            "mode": "managed",
+            "type": "aws_route",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "destination_cidr_block": "0.0.0.0/0",
+                "gateway_id": "igw-a"
+              },
+              "after": {
+                "destination_cidr_block": "0.0.0.0/0",
+                "gateway_id": "igw-a",
+                "nat_gateway_id": "nat-a"
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "error": true
+    },
+    {
+      "name": "Route missing target",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_route.fixture",
+            "mode": "managed",
+            "type": "aws_route",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {},
+              "after": {
+                "destination_cidr_block": "0.0.0.0/0"
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "error": true
+    },
+    {
+      "name": "Route unsupported inline instance field",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_route_table.fixture",
+            "mode": "managed",
+            "type": "aws_route_table",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "route": [
+                  {
+                    "cidr_block": "10.0.0.0/24",
+                    "nat_gateway_id": "nat-a"
+                  }
+                ]
+              },
+              "after": {
+                "route": [
+                  {
+                    "cidr_block": "10.0.0.0/24",
+                    "instance_id": "i-fixture"
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "error": true
+    },
+    {
+      "name": "Unsupported default variant aws_default_route_table",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_default_route_table.fixture",
+            "mode": "managed",
+            "type": "aws_default_route_table",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "route": []
+              },
+              "after": {
+                "route": []
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "unsupported_variant": "aws_default_route_table"
+    },
+    {
+      "name": "Unsupported default variant aws_default_network_acl",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_default_network_acl.fixture",
+            "mode": "managed",
+            "type": "aws_default_network_acl",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": []
+              },
+              "after": {
+                "ingress": []
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "unsupported_variant": "aws_default_network_acl"
+    },
+    {
+      "name": "ACL allow to deny",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_network_acl.fixture",
+            "mode": "managed",
+            "type": "aws_network_acl",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "rule_no": 100,
+                    "action": "allow",
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_block": "10.0.0.0/24"
+                  }
+                ],
+                "egress": []
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "rule_no": 100,
+                    "action": "deny",
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_block": "10.0.0.0/24"
+                  }
+                ],
+                "egress": []
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-NACL-RULE",
+          "severity": "high"
+        }
+      ]
+    },
+    {
+      "name": "ACL rule number remove add",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_network_acl.fixture",
+            "mode": "managed",
+            "type": "aws_network_acl",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "rule_no": 100,
+                    "action": "allow",
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_block": "10.0.0.0/24"
+                  }
+                ],
+                "egress": []
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "rule_no": 200,
+                    "action": "allow",
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_block": "10.0.0.0/24"
+                  }
+                ],
+                "egress": []
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-NACL-RULE",
+          "severity": "high"
+        }
+      ]
+    },
+    {
+      "name": "ACL reorder",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_network_acl.fixture",
+            "mode": "managed",
+            "type": "aws_network_acl",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "rule_no": 100,
+                    "action": "allow",
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_block": "10.0.0.0/24"
+                  },
+                  {
+                    "rule_no": 200,
+                    "action": "allow",
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_block": "10.0.0.0/24"
+                  }
+                ],
+                "egress": []
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "rule_no": 200,
+                    "action": "allow",
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_block": "10.0.0.0/24"
+                  },
+                  {
+                    "rule_no": 100,
+                    "action": "allow",
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_block": "10.0.0.0/24"
+                  }
+                ],
+                "egress": []
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "ACL duplicate exact",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_network_acl.fixture",
+            "mode": "managed",
+            "type": "aws_network_acl",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "rule_no": 100,
+                    "action": "allow",
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_block": "10.0.0.0/24"
+                  }
+                ],
+                "egress": []
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "rule_no": 100,
+                    "action": "allow",
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_block": "10.0.0.0/24"
+                  },
+                  {
+                    "rule_no": 100,
+                    "action": "allow",
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_block": "10.0.0.0/24"
+                  }
+                ],
+                "egress": []
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "ACL conflicting duplicate",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_network_acl.fixture",
+            "mode": "managed",
+            "type": "aws_network_acl",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "rule_no": 100,
+                    "action": "allow",
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_block": "10.0.0.0/24"
+                  }
+                ],
+                "egress": []
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "rule_no": 100,
+                    "action": "allow",
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_block": "10.0.0.0/24"
+                  },
+                  {
+                    "rule_no": 100,
+                    "action": "deny",
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_block": "10.0.0.0/24"
+                  }
+                ],
+                "egress": []
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "error": true
+    },
+    {
+      "name": "ACL unknown key",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_network_acl.fixture",
+            "mode": "managed",
+            "type": "aws_network_acl",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "rule_no": 100,
+                    "action": "allow",
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_block": "10.0.0.0/24"
+                  }
+                ],
+                "egress": []
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "rule_no": 100,
+                    "action": "allow",
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_block": "10.0.0.0/24"
+                  }
+                ],
+                "egress": []
+              },
+              "after_unknown": {
+                "ingress": [
+                  {
+                    "rule_no": true
+                  }
+                ]
+              },
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-NACL-RULE",
+          "severity": "high",
+          "message_code": "ACL_COVERAGE_UNCERTAIN"
+        }
+      ]
+    },
+    {
+      "name": "ACL hidden tuple",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_network_acl.fixture",
+            "mode": "managed",
+            "type": "aws_network_acl",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "rule_no": 100,
+                    "action": "allow",
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_block": "10.0.0.0/24"
+                  }
+                ],
+                "egress": []
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "rule_no": 100,
+                    "action": "allow",
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_block": "10.0.0.0/24"
+                  }
+                ],
+                "egress": []
+              },
+              "after_unknown": {},
+              "before_sensitive": {
+                "ingress": [
+                  {
+                    "action": true
+                  }
+                ]
+              },
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-NACL-RULE",
+          "severity": "high",
+          "message_code": "ACL_COVERAGE_UNCERTAIN"
+        }
+      ]
+    },
+    {
+      "name": "ACL invalid direction independent",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_network_acl.fixture",
+            "mode": "managed",
+            "type": "aws_network_acl",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "rule_no": 100,
+                    "action": "allow",
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_block": "10.0.0.0/24"
+                  }
+                ],
+                "egress": []
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "rule_no": null,
+                    "action": "allow",
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_block": "10.0.0.0/24"
+                  }
+                ],
+                "egress": []
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "error": true
+    },
+    {
+      "name": "ACL direction remove add",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_network_acl_rule.fixture",
+            "mode": "managed",
+            "type": "aws_network_acl_rule",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "egress": false,
+                "rule_number": 100,
+                "rule_action": "allow",
+                "protocol": "tcp",
+                "from_port": 443,
+                "to_port": 443,
+                "cidr_block": "10.0.0.0/24"
+              },
+              "after": {
+                "egress": true,
+                "rule_number": 100,
+                "rule_action": "allow",
+                "protocol": "tcp",
+                "from_port": 443,
+                "to_port": 443,
+                "cidr_block": "10.0.0.0/24"
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-NACL-RULE",
+          "severity": "high"
+        }
+      ]
+    },
+    {
+      "name": "ACL tags only",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_network_acl.fixture",
+            "mode": "managed",
+            "type": "aws_network_acl",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "rule_no": 100,
+                    "action": "allow",
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_block": "10.0.0.0/24"
+                  }
+                ],
+                "egress": [],
+                "tags": {
+                  "x": "old"
+                }
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "rule_no": 100,
+                    "action": "allow",
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_block": "10.0.0.0/24"
+                  }
+                ],
+                "egress": [],
+                "tags": {
+                  "x": "new"
+                }
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "Nested sensitivity safe sibling",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "tags": {
+                  "private": "before",
+                  "safe": "safe-before"
+                }
+              },
+              "after": {
+                "tags": {
+                  "private": "after",
+                  "safe": "safe-after"
+                }
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {
+                "tags": {
+                  "private": true
+                }
+              }
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "states": {
+        "tags.private": "hidden",
+        "tags.safe": "known"
+      }
+    },
+    {
+      "name": "Ambiguous sensitivity hides parent",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "tags": {
+                  "safe": "safe"
+                }
+              },
+              "after": {
+                "tags": {
+                  "safe": "safe"
+                }
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {
+                "tags": [
+                  true
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "states": {
+        "tags": "hidden"
+      }
+    },
+    {
+      "name": "Null absent unknown distinctions",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "tags": {
+                  "null": null,
+                  "removed": "old"
+                }
+              },
+              "after": {
+                "tags": {
+                  "null": null,
+                  "new": "new"
+                }
+              },
+              "after_unknown": {
+                "tags": {
+                  "future": true
+                }
+              },
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "states": {
+        "tags.null": "null",
+        "tags.removed": "absent",
+        "tags.future": "unknown",
+        "tags.new": "known"
+      }
+    },
+    {
+      "name": "Lossless precision",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "backup_retention_period": null
+              },
+              "after": {
+                "backup_retention_period": null
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ],
+        "output_changes": {
+          "large": {
+            "actions": [
+              "update"
+            ],
+            "before": 9007199254740993,
+            "after": 9007199254740995,
+            "after_unknown": false,
+            "before_sensitive": false,
+            "after_sensitive": false
+          }
+        }
+      },
+      "expected": [],
+      "number": "9007199254740995"
+    },
+    {
+      "name": "Known secret both sides",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "tags": {
+                  "private": "old",
+                  "safe": "visible"
+                }
+              },
+              "after": {
+                "tags": {
+                  "private": "prefix-synthetic-private-suffix",
+                  "safe": "visible"
+                }
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "secrets": [
+        {
+          "value": "synthetic-private"
+        }
+      ],
+      "states": {
+        "tags.private": "hidden",
+        "tags.safe": "known"
+      }
+    },
+    {
+      "name": "Known secret map key hides parent",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "tags": {
+                  "safe": "old"
+                }
+              },
+              "after": {
+                "tags": {
+                  "synthetic-private": "new"
+                }
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "secrets": [
+        {
+          "value": "synthetic-private"
+        }
+      ],
+      "states": {
+        "tags": "hidden"
+      }
+    },
+    {
+      "name": "Known secret address opaque",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture[\"synthetic-private\"]",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {},
+              "after": {},
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "secrets": [
+        {
+          "value": "synthetic-private"
+        }
+      ],
+      "hidden_address": true
+    },
+    {
+      "name": "JSON TF_VAR numeric boolean string leaves",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "tags": {
+                  "private": "old"
+                }
+              },
+              "after": {
+                "tags": {
+                  "private": "leaf-secret"
+                }
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "secrets": [
+        {
+          "value": "{\"nested\":[\"leaf-secret\",314159265358979323,true]}",
+          "json_variable": true
+        }
+      ],
+      "states": {
+        "tags.private": "hidden"
+      }
+    },
+    {
+      "name": "Known secret native scalar number",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "backup_retention_period": 7
+              },
+              "after": {
+                "backup_retention_period": 314159265358979323
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-RDS-BACKUP",
+          "severity": "attention"
+        }
+      ],
+      "secrets": [
+        {
+          "value": "314159265358979323"
+        }
+      ],
+      "states": {
+        "backup_retention_period": "hidden"
+      }
+    },
+    {
+      "name": "Transformed unknown historical limitation",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "tags": {
+                  "transformed": "c3ludGhldGljLXByaXZhdGU="
+                }
+              },
+              "after": {
+                "tags": {
+                  "transformed": "historical-unknown"
+                }
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "secrets": [
+        {
+          "value": "synthetic-private"
+        }
+      ],
+      "states": {
+        "tags.transformed": "known"
+      }
+    },
+    {
+      "name": "Unknown action rejected",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "forget"
+              ],
+              "before": {},
+              "after": {},
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "error": true
+    },
+    {
+      "name": "Unknown action permutation rejected",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update",
+                "delete"
+              ],
+              "before": {},
+              "after": {},
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "error": true
+    },
+    {
+      "name": "Missing before rejected",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "after": {},
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "error": true
+    },
+    {
+      "name": "Missing sensitivity rejected",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {},
+              "after": {},
+              "after_unknown": {},
+              "before_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "error": true
+    },
+    {
+      "name": "Malformed sensitivity rejected",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {},
+              "after": {},
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": "true"
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "error": true
+    },
+    {
+      "name": "Malformed schema value shape",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "deletion_protection": true
+              },
+              "after": {
+                "deletion_protection": "false"
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "error": true
+    },
+    {
+      "name": "Unsupported format",
+      "plan": {
+        "format_version": "2.0",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {},
+              "after": {},
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "error": true
+    },
+    {
+      "name": "Wrong native engine version",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.7",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {},
+              "after": {},
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "error": true
+    },
+    {
+      "name": "Noop not semantic risk",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "no-op"
+              ],
+              "before": {
+                "deletion_protection": true
+              },
+              "after": {
+                "deletion_protection": false
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "Drift separate from planned actions",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {},
+              "after": {},
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ],
+        "resource_drift": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "delete"
+              ],
+              "before": {},
+              "after": null,
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "Malformed null resource before on update",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": null,
+              "after": {
+                "deletion_protection": false
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "error": true
+    },
+    {
+      "name": "Malformed null resource after on update",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {},
+              "after": null,
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "error": true
+    },
+    {
+      "name": "Sensitive password on resource delete",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "delete"
+              ],
+              "before": {
+                "password": "synthetic-password-only",
+                "identifier": "visible-safe-sibling"
+              },
+              "after": null,
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-ACTION-DELETE",
+          "severity": "critical"
+        }
+      ],
+      "states": {
+        "password": "hidden"
+      }
+    },
+    {
+      "name": "Sensitive password on resource create",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_db_instance.fixture",
+            "mode": "managed",
+            "type": "aws_db_instance",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "create"
+              ],
+              "before": null,
+              "after": {
+                "password": "synthetic-password-only",
+                "identifier": "visible-safe-sibling"
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [],
+      "states": {
+        "password": "hidden"
+      }
+    },
+    {
+      "name": "Known secret in reordered ingress collection",
+      "plan": {
+        "format_version": "1.2",
+        "terraform_version": "1.13.8",
+        "planned_values": {
+          "root_module": {}
+        },
+        "configuration": {
+          "root_module": {}
+        },
+        "resource_changes": [
+          {
+            "address": "aws_security_group.fixture",
+            "mode": "managed",
+            "type": "aws_security_group",
+            "name": "fixture",
+            "provider_name": "registry.opentofu.org/hashicorp/aws",
+            "change": {
+              "actions": [
+                "update"
+              ],
+              "before": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [
+                      "sg-private-A"
+                    ],
+                    "self": false
+                  },
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [
+                      "sg-safe-C"
+                    ],
+                    "self": false
+                  }
+                ]
+              },
+              "after": {
+                "ingress": [
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [
+                      "sg-safe-C"
+                    ],
+                    "self": false
+                  },
+                  {
+                    "protocol": "tcp",
+                    "from_port": 443,
+                    "to_port": 443,
+                    "cidr_blocks": [],
+                    "ipv6_cidr_blocks": [],
+                    "prefix_list_ids": [],
+                    "security_groups": [
+                      "sg-B"
+                    ],
+                    "self": false
+                  }
+                ]
+              },
+              "after_unknown": {},
+              "before_sensitive": {},
+              "after_sensitive": {}
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "rule_id": "CF-SG-INGRESS",
+          "severity": "high",
+          "message_code": "INGRESS_COVERAGE_UNCERTAIN"
+        }
+      ],
+      "secrets": [
+        {
+          "value": "sg-private-A"
+        }
+      ],
+      "states": {
+        "ingress": "hidden"
+      }
+    }
+  ]
+}

@@ -5,6 +5,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"unicode/utf8"
 )
@@ -48,11 +51,153 @@ func (r *Registry) Register(values ...string) error {
 		newTerms = append(newTerms, []byte(v))
 	}
 	r.terms = append(r.terms, newTerms...)
+	sort.SliceStable(r.terms, func(i, j int) bool { return len(r.terms[i]) > len(r.terms[j]) })
 	r.total = total
 	for _, v := range newTerms {
 		r.max = max(r.max, len(v))
 	}
 	return nil
+}
+
+// Contains checks decoded strings and canonical scalar bytes, including keys
+// and identifiers. It never returns the matched value to its caller.
+func (r *Registry) Contains(value string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, term := range r.terms {
+		if strings.Contains(value, string(term)) {
+			return true
+		}
+	}
+	return false
+}
+
+// SecretTerms is shared by log preparation, analysis and independent platform
+// validation. JSON TF_VAR inputs additionally protect decoded scalar leaves.
+func SecretTerms(value string, jsonVariable bool) ([]string, error) {
+	if value == "" || len(value) > 16384 || !utf8.ValidString(value) || strings.ContainsRune(value, 0) {
+		return nil, ErrInvalid
+	}
+	terms := []string{value}
+	if !jsonVariable || !json.Valid([]byte(value)) {
+		return terms, nil
+	}
+	d := json.NewDecoder(strings.NewReader(value))
+	d.UseNumber()
+	var v any
+	if d.Decode(&v) != nil {
+		return nil, ErrInvalid
+	}
+	seen := map[string]bool{value: true}
+	total := len(value)
+	add := func(term string) error {
+		if seen[term] {
+			return nil
+		}
+		if len(terms) >= 4096 || total+len(term) > 262144 {
+			return ErrInvalid
+		}
+		seen[term] = true
+		terms = append(terms, term)
+		total += len(term)
+		return nil
+	}
+	var leaves func(any, int) error
+	leaves = func(v any, depth int) error {
+		if depth > 96 {
+			return ErrInvalid
+		}
+		switch x := v.(type) {
+		case string:
+			if x != "" {
+				if e := add(x); e != nil {
+					return e
+				}
+			}
+		case json.Number:
+			n, e := CanonicalNumber(string(x))
+			if e != nil {
+				return e
+			}
+			if e := add(string(x)); e != nil {
+				return e
+			}
+			if e := add(n); e != nil {
+				return e
+			}
+		case bool:
+			if e := add(strconv.FormatBool(x)); e != nil {
+				return e
+			}
+		case []any:
+			for _, child := range x {
+				if e := leaves(child, depth+1); e != nil {
+					return e
+				}
+			}
+		case map[string]any:
+			for _, child := range x {
+				if e := leaves(child, depth+1); e != nil {
+					return e
+				}
+			}
+		}
+		return nil
+	}
+	if e := leaves(v, 0); e != nil {
+		return nil, e
+	}
+	return terms, nil
+}
+
+// CanonicalNumber expands JSON decimals without float conversion. Bounds apply
+// before allocation, including exponent expansion; overflow never truncates.
+func CanonicalNumber(value string) (string, error) {
+	if len(value) > 16384 || strings.TrimSpace(value) != value || !json.Valid([]byte(value)) || value == "" || !strings.ContainsAny(value[:1], "-0123456789") {
+		return "", ErrInvalid
+	}
+	negative := strings.HasPrefix(value, "-")
+	s := strings.TrimPrefix(value, "-")
+	exponent := 0
+	if at := strings.IndexAny(s, "eE"); at >= 0 {
+		var e error
+		exponent, e = strconv.Atoi(s[at+1:])
+		if e != nil || exponent < -16384 || exponent > 16384 {
+			return "", ErrInvalid
+		}
+		s = s[:at]
+	}
+	decimal := strings.IndexByte(s, '.')
+	if decimal < 0 {
+		decimal = len(s)
+	}
+	digits := strings.ReplaceAll(s, ".", "")
+	position := decimal + exponent
+	if position < 0 {
+		digits = "0." + strings.Repeat("0", -position) + digits
+	} else if position >= len(digits) {
+		digits += strings.Repeat("0", position-len(digits))
+	} else {
+		digits = digits[:position] + "." + digits[position:]
+	}
+	halves := strings.SplitN(digits, ".", 2)
+	integer := strings.TrimLeft(halves[0], "0")
+	if integer == "" {
+		integer = "0"
+	}
+	result := integer
+	if len(halves) == 2 {
+		if fraction := strings.TrimRight(halves[1], "0"); fraction != "" {
+			result += "." + fraction
+		}
+	}
+	if result != "0" && negative {
+		result = "-" + result
+	}
+	if len(result) > 16384 {
+		return "", ErrInvalid
+	}
+	return result, nil
 }
 
 type Pipe struct {
