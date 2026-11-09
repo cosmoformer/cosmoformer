@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -48,7 +49,7 @@ func TestMigrationCommand(t *testing.T) {
 	}
 	for i := 0; i < 2; i++ {
 		output, err := operator(t, binary, owner, "migrate").CombinedOutput()
-		requireExit(t, output, err, 0, "Database schema is current (version 8).")
+		requireExit(t, output, err, 0, fmt.Sprintf("Database schema is current (version %d).", store.SchemaVersion))
 	}
 	if err := db.App.Ready(ctx); err != nil {
 		t.Fatal("CLI migrations did not provision a usable runtime schema", err)
