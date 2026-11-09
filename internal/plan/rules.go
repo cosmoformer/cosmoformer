@@ -92,7 +92,7 @@ func addFinding(r *Resource, rule, severity, message, coverage string, path []an
 }
 func classify(r *Resource, semantic bool) error {
 	destructive := "high"
-	if semantic && (r.Type == "aws_db_instance" || r.Type == "aws_rds_cluster") {
+	if semantic && (r.classificationType == "aws_db_instance" || r.classificationType == "aws_rds_cluster") {
 		destructive = "critical"
 	}
 	if len(r.Actions) == 2 {
@@ -103,7 +103,7 @@ func classify(r *Resource, semantic bool) error {
 	if !semantic {
 		return nil
 	}
-	switch r.Type {
+	switch r.classificationType {
 	case "aws_db_instance", "aws_rds_cluster":
 		if e := rdsRules(r); e != nil {
 			return e
@@ -129,7 +129,7 @@ func rdsRules(r *Resource) error {
 		return nil
 	}
 	for _, item := range []struct{ key, rule, typ string }{{"deletion_protection", "CF-RDS-PROTECTION", "boolean"}, {"backup_retention_period", "CF-RDS-BACKUP", "number"}, {"publicly_accessible", "CF-RDS-PUBLIC", "boolean"}} {
-		if r.Type == "aws_rds_cluster" && item.key == "publicly_accessible" {
+		if r.classificationType == "aws_rds_cluster" && item.key == "publicly_accessible" {
 			continue
 		}
 		b, a := field(*r, item.key, true), field(*r, item.key, false)
@@ -284,7 +284,7 @@ func ingressAtoms(r Resource, before bool) ([]atom, bool, error) {
 	if uncertain(root) {
 		return nil, true, nil
 	}
-	if r.Type == "aws_security_group" {
+	if r.classificationType == "aws_security_group" {
 		a, u, e := collection(get(root, "ingress"))
 		if e != nil {
 			return nil, false, e
@@ -303,7 +303,7 @@ func ingressAtoms(r Resource, before bool) ([]atom, bool, error) {
 		if !known(entry, "object") {
 			return nil, false, ErrUnsupported
 		}
-		if r.Type == "aws_security_group_rule" {
+		if r.classificationType == "aws_security_group_rule" {
 			typ := get(entry, "type")
 			if uncertain(typ) {
 				unc = true
@@ -318,7 +318,7 @@ func ingressAtoms(r Resource, before bool) ([]atom, bool, error) {
 			}
 		}
 		protocolKey := "protocol"
-		if r.Type == "aws_vpc_security_group_ingress_rule" {
+		if r.classificationType == "aws_vpc_security_group_ingress_rule" {
 			protocolKey = "ip_protocol"
 		}
 		p, u, e := protocol(get(entry, protocolKey))
@@ -366,7 +366,7 @@ func ingressAtoms(r Resource, before bool) ([]atom, bool, error) {
 			}
 			return nil
 		}
-		if r.Type == "aws_vpc_security_group_ingress_rule" {
+		if r.classificationType == "aws_vpc_security_group_ingress_rule" {
 			for _, f := range []struct {
 				k, kind string
 				family  int
@@ -390,7 +390,7 @@ func ingressAtoms(r Resource, before bool) ([]atom, bool, error) {
 				k, kind string
 				family  int
 			}{{"cidr_blocks", "cidr", 4}, {"ipv6_cidr_blocks", "cidr", 6}, {"prefix_list_ids", "prefix", 0}, {"security_groups", "sg", 0}} {
-				if f.k == "security_groups" && r.Type == "aws_security_group_rule" {
+				if f.k == "security_groups" && r.classificationType == "aws_security_group_rule" {
 					continue
 				}
 				v := get(entry, f.k)
@@ -405,7 +405,7 @@ func ingressAtoms(r Resource, before bool) ([]atom, bool, error) {
 					}
 				}
 			}
-			if r.Type == "aws_security_group_rule" {
+			if r.classificationType == "aws_security_group_rule" {
 				v := get(entry, "source_security_group_id")
 				if v.State != "absent" {
 					if e = addPeer(v, "sg", 0); e != nil {
@@ -573,7 +573,7 @@ func routes(r Resource, before bool) (map[string]route, bool, error) {
 	}
 	entries := []Value{root}
 	unc := false
-	inline := r.Type == "aws_route_table"
+	inline := r.classificationType == "aws_route_table"
 	if inline {
 		a, u, e := collection(get(root, "route"))
 		if e != nil {
@@ -690,7 +690,7 @@ func routeRules(r *Resource) error {
 	}
 
 	path := []any{}
-	if r.Type == "aws_route_table" {
+	if r.classificationType == "aws_route_table" {
 		path = []any{"route"}
 	}
 	if bu || au {
@@ -748,7 +748,7 @@ func aclEntries(r Resource, before bool) (map[aclKey]aclTuple, bool, error) {
 		direction bool
 	}
 	entries := []entry{}
-	if r.Type == "aws_network_acl" {
+	if r.classificationType == "aws_network_acl" {
 		for _, direction := range []bool{false, true} {
 			key := "ingress"
 			if direction {
@@ -780,7 +780,7 @@ func aclEntries(r Resource, before bool) (map[aclKey]aclTuple, bool, error) {
 		}
 		direction := entry.direction
 		numberKey, actionKey := "rule_no", "action"
-		if r.Type == "aws_network_acl_rule" {
+		if r.classificationType == "aws_network_acl_rule" {
 			numberKey = "rule_number"
 			actionKey = "rule_action"
 			d := get(v, "egress")

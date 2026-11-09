@@ -43,6 +43,7 @@ type Access struct {
 	binding                                Binding
 	bootstrap, execution                   role
 	region, bucket, owner, policy, session string
+	workspace, stateKey                    string
 	registry                               *evidence.Registry
 	clock                                  clock.Source
 	wall                                   func() time.Time
@@ -93,7 +94,7 @@ func newAccess(expected string, a runs.Assignment, worker runs.Identity, pollAnc
 	if pollAnchor > time.Duration(1<<63-1)-duration {
 		return nil, ErrAccess
 	}
-	return &Access{binding: Binding{worker, a.AttemptID, a.Digest, a.Platform, pollAnchor + duration}, bootstrap: b, execution: r, region: s.Backend.Region, bucket: s.Backend.Target.Bucket, owner: s.Backend.ExpectedOwner, policy: string(p), session: "cosmoformer-" + a.AttemptID, registry: registry, clock: ticks, wall: wall, clients: clients, last: pollAnchor}, nil
+	return &Access{binding: Binding{worker, a.AttemptID, a.Digest, a.Platform, pollAnchor + duration}, bootstrap: b, execution: r, region: s.Backend.Region, workspace: s.Workspace, stateKey: s.Backend.Target.Key, bucket: s.Backend.Target.Bucket, owner: s.Backend.ExpectedOwner, policy: string(p), session: "cosmoformer-" + a.AttemptID, registry: registry, clock: ticks, wall: wall, clients: clients, last: pollAnchor}, nil
 }
 
 // Formatting/serialization must never traverse credential-bearing fields.
@@ -224,6 +225,18 @@ func (a *Access) checkBackend(ctx context.Context) error {
 	response, ok := awsmiddleware.GetRawResponse(out.ResultMetadata).(*smithyhttp.Response)
 	if !ok || response.Response == nil || response.StatusCode != 200 || len(response.Header.Values("X-Amz-Bucket-Region")) != 1 {
 		return ErrAccess
+	}
+	if a.workspace != "default" {
+		// S3 init can otherwise accept an absent non-default workspace. Require
+		// its existing exact state object; never create/select a workspace.
+		state, e := a.backend.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(a.bucket), Key: aws.String(a.stateKey), ExpectedBucketOwner: aws.String(a.owner)})
+		if e != nil || state == nil || state.ContentLength == nil || *state.ContentLength <= 0 {
+			return ErrAccess
+		}
+		response, ok := awsmiddleware.GetRawResponse(state.ResultMetadata).(*smithyhttp.Response)
+		if !ok || response.Response == nil || response.StatusCode != 200 {
+			return ErrAccess
+		}
 	}
 	_, e = a.checkBudget()
 	return e

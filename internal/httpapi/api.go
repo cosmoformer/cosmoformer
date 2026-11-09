@@ -13,6 +13,7 @@ import (
 	"github.com/cosmoformer/cosmoformer/internal/cryptostore"
 	"github.com/cosmoformer/cosmoformer/internal/evidence"
 	"github.com/cosmoformer/cosmoformer/internal/identity"
+	"github.com/cosmoformer/cosmoformer/internal/plan"
 	"github.com/cosmoformer/cosmoformer/internal/runs"
 	"github.com/cosmoformer/cosmoformer/internal/store"
 	"github.com/danielgtaylor/huma/v2"
@@ -37,12 +38,13 @@ func New(s *store.Store, origin string) (http.Handler, huma.API) {
 }
 
 type Options struct {
-	Evidence       *evidence.Custody
-	Clock          clock.Source
-	Bitbucket      *bitbucket.Client
-	Cipher         *cryptostore.Cipher
-	Background     context.Context
-	NativeEvidence coordinator.NativeEvidenceVerifier
+	Evidence                                    *evidence.Custody
+	Clock                                       clock.Source
+	Bitbucket                                   *bitbucket.Client
+	Cipher                                      *cryptostore.Cipher
+	Background                                  context.Context
+	NativeEvidence                              coordinator.NativeEvidenceVerifier
+	PlanSeconds, PreflightSeconds, PlanTTLHours int64
 }
 
 func NewWithOptions(s *store.Store, origin string, options Options) (http.Handler, huma.API) {
@@ -56,6 +58,19 @@ func NewWithOptions(s *store.Store, origin string, options Options) (http.Handle
 	server.Evidence = options.Evidence
 	server.Coordinator.Evidence = options.Evidence
 	server.Coordinator.NativeEvidence = options.NativeEvidence
+	if server.Coordinator.NativeEvidence == nil {
+		server.Coordinator.NativeEvidence = plan.Verifier{}
+	}
+	if options.PlanSeconds != 0 {
+		server.Coordinator.PlanSeconds = options.PlanSeconds
+	}
+	if options.PreflightSeconds != 0 {
+		server.Coordinator.PreflightSeconds = options.PreflightSeconds
+	}
+	if options.PlanTTLHours != 0 {
+		server.Coordinator.PlanTTLHours = options.PlanTTLHours
+	}
+	server.Coordinator.ManagedSecrets = server.currentExecutionSecrets
 	server.Coordinator.ObserveSource = server.workerSourceObservation
 	server.Previews = evidence.NewPreviews(runs.ID)
 	if s != nil {
@@ -71,6 +86,7 @@ func NewWithOptions(s *store.Store, origin string, options Options) (http.Handle
 	server.registerAdmin(api)
 	server.registerConfiguration(api)
 	server.registerPreflights(api)
+	server.registerPlanningReads(api)
 	server.registerWorker(api)
 	server.registerEvidence(api)
 	server.registerWebhook(api)

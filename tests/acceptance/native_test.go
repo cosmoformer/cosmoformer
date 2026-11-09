@@ -702,11 +702,40 @@ func (h nativeHarness) verifyAnalysisFixtures(dir string, schema []byte) {
 					t.Fatalf("unexpected native finding: %+v", f)
 				}
 			}
+			retained, _ := json.Marshal(out)
+			var decoded plan.Result
+			if json.Unmarshal(retained, &decoded) != nil || plan.VerifySanitized(out, &decoded) != nil {
+				t.Fatal("native retained analysis failed independent verification")
+			}
+			if resources, ok := native["resource_changes"].([]any); ok && len(resources) == 1 {
+				typ, _ := resources[0].(map[string]any)["type"].(string)
+				if typ != "" {
+					if options.Secrets.Register(typ) != nil {
+						t.Fatal("mask registry")
+					}
+					masked, err := plan.Analyze(raw, schema, options)
+					if err != nil {
+						t.Fatal("masked native dispatch", err)
+					}
+					if len(masked.Findings) != len(out.Findings) {
+						t.Fatal("masked native dispatch omitted warnings")
+					}
+					for i, finding := range masked.Findings {
+						if finding.Rule != out.Findings[i].Rule || finding.Severity != out.Findings[i].Severity {
+							t.Fatal("masked native dispatch downgraded warning")
+						}
+					}
+					public, _ := json.Marshal(masked)
+					if bytes.Contains(public, []byte(typ)) {
+						t.Fatal("masked identifier serialized")
+					}
+				}
+			}
 		})
 	}
 	if t.Failed() {
 		return
 	}
 	hash := sha256.Sum256(schema)
-	t.Logf("verified profile %s: AWS 6.41.0, raw schema SHA-256 %x, %d synthetic analysis cases against actual native schema; production execution disabled; company not_assessed", o.ProfileID, hash, len(fixture.Cases))
+	t.Logf("verified profile %s: AWS 6.41.0, raw schema SHA-256 %x, %d synthetic analysis cases against actual native schema; company execution remains not_assessed", o.ProfileID, hash, len(fixture.Cases))
 }

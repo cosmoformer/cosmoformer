@@ -2,15 +2,15 @@
 
 Cosmoformer is an early-stage, open-source infrastructure automation project. The local reference implementation provides accounts, access control and source preflight with a Go backend, PostgreSQL, and a React Router SPA using Astryx.
 
-You can create local accounts, sign in, manage organizations and teams, and assign project/environment access. New accounts have no access. Administration, deployment, approval and raw-evidence permissions are separate. Source preflight adds bounded Bitbucket source reads, strict Git configuration, registered Linux workers and permanent state-destination ownership checks. It does not initialize a backend, read existing state, assume AWS roles, plan or apply infrastructure. There is no production release.
+You can create local accounts, sign in, manage organizations and teams, and assign project/environment access. New accounts have no access. Administration, deployment, approval and raw-evidence permissions are separate. Check source performs Git/HCL preflight and permanent state-destination checks without native execution or an AWS session.
 
-Evidence storage and redacted logging are available as bounded backend/worker capabilities. Artifact custody uses the platform EC2 role, a private versioned S3 bucket with SSE-S3, immutable upload receipts, and verified exact-version reads. Logs retain ordered segments or explicit loss gaps; previews are volatile and cannot prove completion. Browser evidence reads enforce current scope grants, with a separate raw-evidence grant. Native planning, execution, Apply and recovery workflows remain unavailable.
+Explicit Plan requests now progress through separate preflight and execution assignments. Assessed compatible stacks can use a fresh Linux worker checkout, pinned module closure, guarded managed inputs and one fixed AWS session to run init → manifest seal → provider schema → saved plan → show JSON. Current source, authority, grants, runtime, inputs and exact worker/backend reservations gate execution. Existing requests and source-reconciliation jobs remain source-only; there is no compatibility bypass. Actual company compatibility remains `not_assessed`.
 
-The native execution control protocol adds closed execution identities, protected secret-input delivery, immutable pre-init evidence, one-way manifest sealing, and ordered command permissions/events/results. Permissions retain their identity and decreasing elapsed-time budget across retries; uncertain execution retains ownership. Schema version 8 stores these facts without changing migrations 001–007. Migration 009 requires schema version 9 and keeps trusted schemas ahead of temporary relations in every owner-executed database helper.
+Readiness requires verified exact-version evidence, a sealed reviewed-input manifest, supported native analysis and an independent current managed-secret check. Scoped API reads expose sanitized Changes; raw evidence requires the separate raw-evidence grant. No changes is distinct from source-check success and includes output-only change detection. Logs retain redacted segments or explicit gaps. Missing responses, elapsed deadlines and signal delivery never prove stop or release uncertain ownership.
 
-Normal worker admission and scheduling remain source-preflight-only. The protocol is exercised with isolated PostgreSQL and injected native evidence boundaries. Native launches, plan analysis/readiness, approvals, Apply and recovery workflows remain unavailable. There is no execution enablement flag.
+Schema version **10** adds immutable explicit planning intent and ready-plan identities while preserving migrations 001–009. The reference engines are OpenTofu **1.13.8** and Terraform **1.17.1**, Linux amd64. Exact AWS provider **6.41.0** schema profiles provide the selected warnings; other validated allowed-registry providers have generic coverage. Unsupported KMS execution remains blocked.
 
-The AWS execution-access adapter is an explicit, disconnected preparation capability. It reads bootstrap credentials only from fixed-endpoint IMDSv2, verifies the approved role identity, requests one fixed 3600-second STS session with the generated backend-owner policy, verifies the resulting identity, and checks bucket owner/region. BOOTTIME deadlines include response delay and a five-minute stop margin; the adapter cannot renew credentials or extend an attempt's authority. The attempt redactor must accept all credential values before the adapter returns the five temporary AWS environment entries. Account/source-only startup and scheduling never call this adapter. Synthetic fixtures establish adapter behavior, not live IAM authorization; actual company compatibility remains `not_assessed`. See the [execution-access boundary](docs/operator-guide.md#aws-execution-access-adapter).
+There is no production release. Approvals, Apply, recovery clearance, Force Stop UI, scheduled cleanup, deployment packaging and the fuller Changes workspace remain unfinished. Synthetic PostgreSQL/worker tests and the separate network-isolated native matrices do not establish live AWS/IAM or company compatibility. See the [planning behavior and boundaries](docs/operator-guide.md#native-planning).
 
 ## Local development
 
@@ -93,7 +93,7 @@ Milestone 5 adds `internal/plan` for strict native evidence validation, sanitize
 
 Selected AWS rules cover destructive actions, RDS protection/backup/public settings, security-group ingress, VPC routes and network ACL rules. Network findings describe potential settings changes, not proven reachability or business outages. Exact provider/schema profiles are checked offline with both pinned engines and AWS **6.41.0**. Other allowed external providers receive validated generic action/value rendering with explicit absent semantic coverage. Default route-table/default ACL variants receive no related-type semantic fallback.
 
-`internal/testdata/plans.json` contains 126 synthetic cases. `internal/testdata/compatibility.json` records native schema fingerprints and extracted resource shapes; synthetic plans alone do not establish compatibility. See the [analysis limits and integration boundary](docs/operator-guide.md#plan-analysis-library-and-coverage) before using the library. Production remains source-preflight-only: native planning, readiness, approvals, Apply, recovery and the Changes workspace are unfinished. Company compatibility remains `not_assessed`.
+`internal/testdata/plans.json` contains 126 synthetic cases. `internal/testdata/compatibility.json` records native schema fingerprints and extracted resource shapes; synthetic plans alone do not establish compatibility. See the [analysis limits and integration boundary](docs/operator-guide.md#plan-analysis-library-and-coverage) before using the library. Native planning and readiness are connected through explicit requests; approvals, Apply, recovery clearance and the fuller Changes workspace remain unfinished. Company compatibility remains `not_assessed`.
 
 ## Checks
 
@@ -162,7 +162,7 @@ Coverage includes all application TypeScript/React files, including unvisited fi
 Serving never migrates implicitly. The runtime uses `COSMOFORMER_DATABASE_DSN_FILE`; migration/bootstrap/recovery commands use the separate `COSMOFORMER_MIGRATION_DSN_FILE`. Input files must be regular, owner-readable only. The development setup provisions distinct owner and restricted runtime database roles.
 
 ```sh
-# List the nine embedded forward-only migrations without a database connection:
+# List the ten embedded forward-only migrations without a database connection:
 .build/tools/go/bin/go run ./cmd/cosmoformer migrate --list
 
 # Recover an existing enabled installation administrator on this local DB:

@@ -627,3 +627,101 @@ func TestDriftCoverageDoesNotImplyDefaultVariantSupport(t *testing.T) {
 		t.Fatal("drift gained action counts or unimplemented semantic coverage")
 	}
 }
+
+// Display masking must never change the validated rule dispatch or severity.
+func TestMaskedResourceClassification(t *testing.T) {
+	s := fixtureSchema(t)
+	for _, f := range loadFixtures(t) {
+		v, err := strictJSON(f.Plan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		entries := list(obj(v)["resource_changes"])
+		if len(entries) != 1 {
+			continue
+		}
+		typ := str(obj(entries[0])["type"])
+		if !supportedType(typ) {
+			continue
+		}
+		t.Run(f.Name, func(t *testing.T) {
+			o := fixtureOptions(t, f.Plan)
+			for _, value := range f.Secrets {
+				terms, err := evidence.SecretTerms(value.Value, value.JSON)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = o.Secrets.Register(terms...); err != nil {
+					t.Fatal(err)
+				}
+			}
+			secret := typ
+			if typ == "aws_db_instance" {
+				secret = "db_instance"
+			}
+			if err := o.Secrets.Register(secret); err != nil {
+				t.Fatal(err)
+			}
+			out, err := analyze(f.Plan, o, s)
+			if f.Error {
+				if err == nil || out != nil {
+					t.Fatal("masked invalid evidence did not fail closed")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := out.Resources[0]
+			if r.Type != "hidden" || r.Address != "hidden" {
+				t.Fatal("matched identifiers exposed")
+			}
+			if len(out.Findings) != len(f.Expected) {
+				t.Fatalf("masked dispatch lost findings: got %+v, want %+v", out.Findings, f.Expected)
+			}
+			for i, want := range f.Expected {
+				got := out.Findings[i]
+				if got.Rule != want.Rule || got.Severity != want.Severity || want.Message != "" && got.Message != want.Message {
+					t.Fatalf("masked dispatch changed warning: got %+v, want %+v", got, want)
+				}
+			}
+			raw, err := json.Marshal(out)
+			if err != nil || bytes.Contains(raw, []byte(secret)) || validateRegistry(raw, o.Secrets) != nil {
+				t.Fatal("serialized result leaked masked identifier")
+			}
+			if len(out.Coverage[0].Variants) != 0 {
+				t.Fatal("masked supported type became an unsupported variant")
+			}
+		})
+	}
+}
+
+func TestRetainedSanitizedRulesCannotBeOmitted(t *testing.T) {
+	s := fixtureSchema(t)
+	for _, f := range loadFixtures(t) {
+		if f.Error || len(f.Expected) == 0 || len(f.Secrets) > 0 {
+			continue
+		}
+		t.Run(f.Name, func(t *testing.T) {
+			options := fixtureOptions(t, f.Plan)
+			expected, e := analyze(f.Plan, options, s)
+			if e != nil {
+				t.Fatal(e)
+			}
+			raw, _ := json.Marshal(expected)
+			var decoded Result
+			if json.Unmarshal(raw, &decoded) != nil {
+				t.Fatal("decode safe artifact")
+			}
+			if e = VerifySanitized(expected, &decoded); e != nil {
+				t.Fatal("valid retained artifact rejected", e)
+			}
+			decoded.Resources[0].Findings = []Finding{}
+			decoded.Findings = []Finding{}
+			decoded.Summary.Findings = map[string]int{}
+			if VerifySanitized(expected, &decoded) == nil {
+				t.Fatal("omitted warnings accepted")
+			}
+		})
+	}
+}

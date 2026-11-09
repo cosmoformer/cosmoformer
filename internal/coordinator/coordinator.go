@@ -1,5 +1,5 @@
 // Package coordinator implements worker coordination and the native control
-// protocol. Production admission and scheduling remain source-preflight-only.
+// protocol, source checks and explicitly requested native planning.
 package coordinator
 
 import (
@@ -16,6 +16,7 @@ import (
 	"github.com/cosmoformer/cosmoformer/internal/clock"
 	"github.com/cosmoformer/cosmoformer/internal/evidence"
 	"github.com/cosmoformer/cosmoformer/internal/identity"
+	"github.com/cosmoformer/cosmoformer/internal/plan"
 	"github.com/cosmoformer/cosmoformer/internal/runs"
 	"github.com/cosmoformer/cosmoformer/internal/source"
 	"github.com/cosmoformer/cosmoformer/internal/store"
@@ -23,16 +24,20 @@ import (
 )
 
 type Coordinator struct {
-	Store          *store.Store
-	Clock          clock.Source
-	Instance       string
-	Evidence       *evidence.Custody
-	ObserveSource  func(context.Context, string, string) (bitbucket.Facts, error)
-	NativeEvidence NativeEvidenceVerifier
+	Store            *store.Store
+	Clock            clock.Source
+	Instance         string
+	Evidence         *evidence.Custody
+	ObserveSource    func(context.Context, string, string) (bitbucket.Facts, error)
+	NativeEvidence   NativeEvidenceVerifier
+	PlanSeconds      int64
+	PreflightSeconds int64
+	PlanTTLHours     int64
+	ManagedSecrets   func(context.Context, pgx.Tx, string, runs.ExecutionSpec) ([]runs.EnvSecret, error)
 }
 
 func New(s *store.Store, c clock.Source) *Coordinator {
-	return &Coordinator{Store: s, Clock: c, Instance: runs.ID()}
+	return &Coordinator{Store: s, Clock: c, Instance: runs.ID(), PlanSeconds: 1200, PreflightSeconds: 300, PlanTTLHours: 168, NativeEvidence: plan.Verifier{}}
 }
 func digest(v any) []byte    { b, _ := catalog.Canonical(v); h := sha256.Sum256(b); return h[:] }
 func hexDigest(v any) string { return hex.EncodeToString(digest(v)) }
@@ -86,7 +91,7 @@ func (c *Coordinator) current(ctx context.Context, tx pgx.Tx, w Worker, id runs.
 }
 func (c *Coordinator) Admit(ctx context.Context, token string, in runs.Admission) (int64, error) {
 	var generation int64
-	if in.Protocol != 1 || !catalog.UUID(in.WorkerID) || !catalog.UUID(in.Agent) || !catalog.UUID(in.RuntimeID) || in.ClockSource != "boottime" || !in.ClockOK || in.Arch != "amd64" || in.GitPackage != "1:2.47.3-0+deb13u1" || in.GitVersion != "git version 2.47.3" || len(in.Phases) != 1 || in.Phases[0] != "preflight" {
+	if in.Protocol != 1 || !catalog.UUID(in.WorkerID) || !catalog.UUID(in.Agent) || !catalog.UUID(in.RuntimeID) || in.ClockSource != "boottime" || !in.ClockOK || in.Arch != "amd64" || in.GitPackage != "1:2.47.3-0+deb13u1" || in.GitVersion != "git version 2.47.3" || !planningPhases(in.Phases) {
 		return 0, runs.Fail("RUNTIME_UNSUPPORTED")
 	}
 	if _, e := c.Clock.Now(); e != nil {
@@ -182,8 +187,10 @@ func (c *Coordinator) Poll(ctx context.Context, token string, in runs.Poll) (*ru
 			type candidate struct {
 				WorkID, OperationID, RunID, StackID string
 				Spec                                runs.PreflightSpec
+				Phase                               string
+				Execution                           *runs.ExecutionSpec
 			}
-			rows, e := tx.Query(ctx, `SELECT wi.id::text,o.id::text,o.run_id::text,o.stack_id::text,wi.assignment_spec FROM cosmoformer.work_items wi JOIN cosmoformer.operations o ON o.id=wi.operation_id JOIN cosmoformer.stacks s ON s.id=o.stack_id WHERE wi.status='queued' AND wi.phase='preflight' AND o.status='queued' AND NOT o.cancel_requested AND NOT s.archived AND wi.assignment_spec->'pool'->>'id'=$1 AND wi.assignment_spec->'engine'->>'runtime_id'=(SELECT runtime_id::text FROM cosmoformer.workers WHERE id=$2) ORDER BY CASE o.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,o.ordering_at,o.id`, w.PoolID, w.ID)
+			rows, e := tx.Query(ctx, `SELECT wi.id::text,o.id::text,o.run_id::text,o.stack_id::text,wi.assignment_spec,wi.phase FROM cosmoformer.work_items wi JOIN cosmoformer.operations o ON o.id=wi.operation_id JOIN cosmoformer.stacks s ON s.id=o.stack_id WHERE wi.status='queued' AND wi.phase IN ('preflight','execution') AND (wi.phase='preflight' OR o.native_planning AND o.kind='plan' AND s.assessment='compatible') AND EXISTS(SELECT FROM cosmoformer.workers cw WHERE cw.id=$2 AND cw.capabilities->'supported_work_phases' ? wi.phase) AND o.status='queued' AND NOT o.cancel_requested AND NOT s.archived AND wi.assignment_spec->'pool'->>'id'=$1 AND wi.assignment_spec->'engine'->>'runtime_id'=(SELECT runtime_id::text FROM cosmoformer.workers WHERE id=$2) ORDER BY CASE o.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,o.ordering_at,o.id`, w.PoolID, w.ID)
 			if e != nil {
 				return e
 			}
@@ -191,11 +198,19 @@ func (c *Coordinator) Poll(ctx context.Context, token string, in runs.Poll) (*ru
 			for rows.Next() {
 				var v candidate
 				var b []byte
-				if e = rows.Scan(&v.WorkID, &v.OperationID, &v.RunID, &v.StackID, &b); e != nil {
+				if e = rows.Scan(&v.WorkID, &v.OperationID, &v.RunID, &v.StackID, &b, &v.Phase); e != nil {
 					rows.Close()
 					return e
 				}
-				if json.Unmarshal(b, &v.Spec) != nil {
+				if v.Phase == "execution" {
+					v.Execution = &runs.ExecutionSpec{}
+					if runs.Decode(b, v.Execution) != nil || v.Execution.Validate() != nil {
+						rows.Close()
+						return runs.Fail("INVALID_SPEC")
+					}
+					v.Spec = v.Execution.Preflight()
+				}
+				if v.Execution == nil && json.Unmarshal(b, &v.Spec) != nil {
 					rows.Close()
 					return runs.Fail("INVALID_SPEC")
 				}
@@ -238,14 +253,51 @@ func (c *Coordinator) Poll(ctx context.Context, token string, in runs.Poll) (*ru
 				if !matched {
 					continue
 				}
+				var target any
+				capSeconds := c.PreflightSeconds
+				if capSeconds == 0 {
+					capSeconds = 300
+				}
+				if v.Execution != nil {
+					capSeconds = c.PlanSeconds
+					if capSeconds == 0 {
+						capSeconds = 1200
+					}
+					var targetID string
+					var busy bool
+					if e = tx.QueryRow(ctx, `SELECT target_id::text,EXISTS(SELECT FROM cosmoformer.backend_reservations WHERE target_id=b.target_id) OR EXISTS(SELECT FROM cosmoformer.recovery_cases WHERE target_id=b.target_id AND status='open') FROM cosmoformer.stack_bindings b WHERE stack_id=$1`, v.StackID).Scan(&targetID, &busy); e != nil {
+						return e
+					}
+					if busy {
+						continue
+					}
+					target = targetID
+				}
 				attempt = runs.ID()
-				deadline := tick + 300*time.Second
-				_, e = tx.Exec(ctx, `INSERT INTO cosmoformer.attempts(id,org_id,work_item_id,operation_id,stack_id,worker_id,generation,agent_instance,state,budget_platform_instance,accepted_tick,deadline_tick,cap_seconds,display_deadline) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'claimed',$9,$10,$11,300,clock_timestamp()+interval '300 seconds')`, attempt, w.OrgID, v.WorkID, v.OperationID, v.StackID, w.ID, in.Generation, in.Agent, c.Instance, int64(tick), int64(deadline))
+				deadline := tick + time.Duration(capSeconds)*time.Second
+				_, e = tx.Exec(ctx, `INSERT INTO cosmoformer.attempts(id,org_id,work_item_id,operation_id,stack_id,worker_id,generation,agent_instance,state,budget_platform_instance,accepted_tick,deadline_tick,cap_seconds,display_deadline,target_id,execution_spec,execution_spec_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'claimed',$9,$10,$11,$12,clock_timestamp()+$12::bigint*interval '1 second',$13,$14,$15)`, attempt, w.OrgID, v.WorkID, v.OperationID, v.StackID, w.ID, in.Generation, in.Agent, c.Instance, int64(tick), int64(deadline), capSeconds, target, executionSpecJSON(v.Execution), executionSpecHash(v.Execution))
 				if e != nil {
 					return e
 				}
 				if _, e = tx.Exec(ctx, `INSERT INTO cosmoformer.worker_reservations(org_id,worker_id,attempt_id,generation,agent_instance) VALUES($1,$2,$3,$4,$5)`, w.OrgID, w.ID, attempt, in.Generation, in.Agent); e != nil {
 					return e
+				}
+				if v.Execution != nil {
+					if _, e = tx.Exec(ctx, `INSERT INTO cosmoformer.backend_reservations(org_id,target_id,attempt_id,stack_id) VALUES($1,$2,$3,$4)`, w.OrgID, target, attempt, v.StackID); e != nil {
+						return e
+					}
+					claimed, e := c.assignment(ctx, tx, attempt)
+					if e != nil {
+						return e
+					}
+					if tag, insertErr := tx.Exec(ctx, `INSERT INTO cosmoformer.plans(org_id,operation_id,attempt_id,stack_id,target_id,status,provenance,source_facts_revision,state_epoch,rule_version,profile_id) VALUES($1,$2,$3,$4,$5,'assembling','normal',$6,$7,$8,$9) ON CONFLICT(operation_id) DO UPDATE SET attempt_id=excluded.attempt_id,state_epoch=excluded.state_epoch,revision=cosmoformer.plans.revision+1 WHERE cosmoformer.plans.status='assembling' AND NOT EXISTS(SELECT FROM cosmoformer.attempts WHERE id=cosmoformer.plans.attempt_id AND ever_permitted)`, w.OrgID, v.OperationID, attempt, v.StackID, target, v.Spec.Source.FactsRevision, claimed.StateEpoch, v.Execution.RuleVersion, v.Execution.ProfileID); insertErr != nil {
+						return insertErr
+					} else if tag.RowsAffected() != 1 {
+						return runs.Fail("PLAN_NOT_ASSEMBLING")
+					}
+					if e = c.executionAuthority(ctx, tx, *claimed); e != nil {
+						return e
+					}
 				}
 				if _, e = tx.Exec(ctx, `UPDATE cosmoformer.work_items SET status='claimed',attempt_count=attempt_count+1,revision=revision+1 WHERE id=$1`, v.WorkID); e != nil {
 					return e
@@ -285,6 +337,9 @@ func (c *Coordinator) assignment(ctx context.Context, tx pgx.Tx, id string) (*ru
 			return nil, runs.Fail("INVALID_SPEC")
 		}
 		a.Spec = a.Execution.Preflight()
+		if e = tx.QueryRow(ctx, `SELECT cosmoformer.execution_target_epoch($1),p.minimum_approvals FROM cosmoformer.stacks st JOIN cosmoformer.projects p ON p.id=st.project_id WHERE st.id=$2`, id, a.StackID).Scan(&a.StateEpoch, &a.ApprovalFloor); e != nil {
+			return nil, e
+		}
 	} else if runs.Decode(b, &a.Spec) != nil {
 		return nil, runs.Fail("INVALID_SPEC")
 	}
@@ -633,8 +688,50 @@ func (c *Coordinator) Transition(ctx context.Context, token, route string, m run
 					return runs.Fail("MESSAGE_CONFLICT")
 				}
 			}
-			// Phase 2 ends with a successful preflight. It queues no native work until
-			// phase 3 implements its full execution and evidence protocol.
+			// Source checks and reconciliation remain source-only. Only immutable
+			// explicit native intent can create the second phase.
+			nativeQueued := false
+			nativeBlocked := ""
+			if p.Outcome == "success" {
+				var native bool
+				if e = tx.QueryRow(ctx, `SELECT native_planning FROM cosmoformer.operations WHERE id=$1`, op).Scan(&native); e != nil {
+					return e
+				}
+				if native {
+					assigned, e := c.assignment(ctx, tx, m.AttemptID)
+					if e != nil {
+						return e
+					}
+					if e = c.authority(ctx, tx, op, assigned.Spec); e != nil {
+						return e
+					}
+					var prepared runs.Prepare
+					var raw []byte
+					if e = tx.QueryRow(ctx, `SELECT resolved_preflight FROM cosmoformer.work_items WHERE id=$1`, work).Scan(&raw); e != nil {
+						return e
+					}
+					if json.Unmarshal(raw, &prepared) != nil {
+						return runs.Fail("INVALID_SPEC")
+					}
+					execution, e := ResolveExecutionSpec(ctx, tx, assigned.Spec, prepared.Backend)
+					if e != nil {
+						return e
+					}
+					execution.RuleVersion = plan.RuleVersion
+					execution.ProfileID = plan.ProfileID(execution.Engine.Name)
+					if e = execution.Validate(); e != nil {
+						return e
+					}
+					if kms, _ := execution.Backend.Attributes["kms_key_id"].(string); kms != "" {
+						nativeBlocked = "KMS_GRANT_PREREQUISITES_UNAVAILABLE"
+					} else {
+						if _, e = tx.Exec(ctx, `INSERT INTO cosmoformer.work_items(org_id,operation_id,phase,status,assignment_spec) VALUES($1,$2,'execution','queued',$3)`, w.OrgID, op, mustJSON(execution)); e != nil {
+							return e
+						}
+						nativeQueued = true
+					}
+				}
+			}
 			out.AttemptState = "terminal"
 			out.OperationStatus = "succeeded"
 			outcome := "success"
@@ -679,6 +776,14 @@ func (c *Coordinator) Transition(ctx context.Context, token, route string, m run
 				return e
 			}
 			reason := "PREFLIGHT_ONLY"
+			if nativeQueued {
+				out.OperationStatus = "queued"
+				reason = "NATIVE_PLANNING_QUEUED"
+			}
+			if nativeBlocked != "" {
+				out.OperationStatus = "failed"
+				reason = nativeBlocked
+			}
 			if p.Outcome != "success" {
 				reason = p.Reason
 				if reason == "" {
@@ -884,4 +989,20 @@ func (c *Coordinator) WithEvidenceAttempt(ctx context.Context, token string, id 
 		}
 		return fn(tx, w, *a)
 	})
+}
+
+func planningPhases(phases []string) bool {
+	return len(phases) == 1 && phases[0] == "preflight" || len(phases) == 2 && phases[0] == "preflight" && phases[1] == "execution"
+}
+func executionSpecJSON(s *runs.ExecutionSpec) any {
+	if s == nil {
+		return nil
+	}
+	return mustJSON(s)
+}
+func executionSpecHash(s *runs.ExecutionSpec) any {
+	if s == nil {
+		return nil
+	}
+	return digest(s)
 }

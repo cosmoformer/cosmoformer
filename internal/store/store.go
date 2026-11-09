@@ -15,7 +15,7 @@ import (
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
-const SchemaVersion int32 = 9
+const SchemaVersion int32 = 10
 
 var ErrForbidden = errors.New("insufficient permission")
 var ErrNotFound = errors.New("not found")
@@ -71,6 +71,9 @@ func (s *Store) Ready(ctx context.Context) error {
  AND has_function_privilege(current_user,'cosmoformer.execution_binding_matches(uuid,text,text,text,text,text)','EXECUTE')
  AND has_function_privilege(current_user,'cosmoformer.execution_attention(uuid)','EXECUTE')`).Scan(&safe); e != nil || !safe {
 		return errors.New("database native protocol has incompatible protections")
+	}
+	if e = s.Pool.QueryRow(ctx, `SELECT (SELECT count(*)=2 FROM pg_trigger WHERE (tgrelid='cosmoformer.operations'::regclass AND tgname='planning_intent_identity' OR tgrelid='cosmoformer.plans'::regclass AND tgname='ready_plan_identity') AND tgenabled='O')`).Scan(&safe); e != nil || !safe {
+		return errors.New("database planning identities have incompatible protections")
 	}
 	return nil
 }

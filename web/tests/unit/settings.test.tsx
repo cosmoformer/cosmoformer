@@ -26,8 +26,8 @@ beforeEach(() => {
         }
         if (broken) return reply({ code: 'UNAVAILABLE', message: 'Synthetic service unavailable.' }, 503);
         if (path.endsWith('/configuration')) return reply({ items: empty ? [] : items, jobs: empty ? [] : [{ id: id(60), kind: 'source_reconcile', status: 'failed', attempts: 12, revision: 1 }, { id: id(61), kind: 'pr_feedback', status: 'pending', attempts: 1, revision: 1 }] });
-        if (path.endsWith('/stacks')) return reply({ stacks: empty ? [] : [{ id: id(40), name: 'Fixture stack', project_id: ids.project, environment_id: ids.env, commit: 'a'.repeat(40), archived: false, can_plan: true }, { id: id(43), name: 'Archived stack', project_id: ids.project, environment_id: ids.env, commit: 'b'.repeat(40), archived: true, can_plan: false }] });
-        return reply({ preflights: empty ? [] : [{ id: id(42), run_id: id(41), stack: 'Fixture stack', commit: 'a'.repeat(40), purpose: 'tracked', status: 'failed', priority: 'medium', reason: 'SOURCE_CHECKOUT_FAILED', revision: 2, can_retry: true, can_prioritize: false }, { id: id(44), run_id: id(45), stack: 'Queued stack', commit: 'b'.repeat(40), purpose: 'pr_preview', status: 'queued', priority: 'medium', reason: '', revision: 1, can_retry: false, can_prioritize: true }, { id: id(46), run_id: id(47), stack: 'Passed stack', commit: 'b'.repeat(40), purpose: 'tracked', status: 'succeeded', priority: 'low', reason: 'PREFLIGHT_ONLY', revision: 3, can_retry: false, can_prioritize: false }] });
+        if (path.endsWith('/stacks')) return reply({ stacks: empty ? [] : [{ id: id(40), name: 'Fixture stack', project_id: ids.project, environment_id: ids.env, commit: 'a'.repeat(40), archived: false, can_plan: true, can_native_plan: true }, { id: id(43), name: 'Archived stack', project_id: ids.project, environment_id: ids.env, commit: 'b'.repeat(40), archived: true, can_plan: false, can_native_plan: false }] });
+        return reply({ preflights: empty ? [] : [{ id: id(42), run_id: id(41), stack: 'Fixture stack', commit: 'a'.repeat(40), native_planning: false, purpose: 'tracked', status: 'failed', priority: 'medium', reason: 'SOURCE_CHECKOUT_FAILED', revision: 2, can_retry: true, can_prioritize: false }, { id: id(44), run_id: id(45), stack: 'Queued stack', commit: 'b'.repeat(40), native_planning: false, purpose: 'pr_preview', status: 'queued', priority: 'medium', reason: '', revision: 1, can_retry: false, can_prioritize: true }, { id: id(46), run_id: id(47), stack: 'Passed stack', commit: 'b'.repeat(40), native_planning: false, purpose: 'tracked', status: 'succeeded', priority: 'low', reason: 'PREFLIGHT_ONLY', revision: 3, can_retry: false, can_prioritize: false }] });
     }));
 });
 function section(name: string) { return within(screen.getByRole('heading', { name }).closest('section')!); }
@@ -46,6 +46,8 @@ describe('Source settings and preflight controls', () => {
         await waitFor(() => expect(screen.getByText('Retry preparation')).not.toBeDisabled()); fireEvent.click(screen.getByText('Retry preparation')); await screen.findByText('Source preparation queued again.');
         fireEvent.click(screen.getByText('Retry delivery')); await waitFor(() => expect(requests.some(r => r.path.includes('/source-jobs/'))).toBe(true));
         expect(requests[0].body).toEqual({ source: { kind: 'branch' }, priority: 'medium' });
+        fireEvent.click(screen.getByRole('button', { name: 'Plan Fixture stack' })); await screen.findByText('Plan queued.');
+        expect(requests.at(-1)?.body).toEqual({ source: { kind: 'branch' }, priority: 'medium', intent: 'native_plan' });
         expect(screen.queryByRole('button', { name: /Apply/ })).not.toBeInTheDocument();
     });
     it('creates pools, connections and repositories with explicit project scope', async () => {

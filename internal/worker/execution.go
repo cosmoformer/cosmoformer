@@ -101,3 +101,28 @@ func (p *LaunchPermission) DiscardExpired(id runs.Identity, attempt string, now 
 func canonicalSecretNumber(value string) (string, error) {
 	return evidence.CanonicalNumber(value)
 }
+
+func (p *LaunchPermission) Check(id runs.Identity, attempt, digest string, now time.Duration) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.identity != id || p.attempt != attempt || p.permission.Digest != digest || p.state != "not_spawned" || now < p.anchor || now >= p.deadline {
+		return ErrAgent
+	}
+	return nil
+}
+
+// Spawn holds the same single-use lock through the final clock read and exec
+// boundary. Scheduling delay after the earlier preparation check grants no time.
+func (p *LaunchPermission) Spawn(id runs.Identity, attempt, digest string, ticks clock.Source, start func() error) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if ticks == nil || start == nil {
+		return ErrAgent
+	}
+	now, e := ticks.Now()
+	if e != nil || p.identity != id || p.attempt != attempt || p.permission.Digest != digest || p.state != "not_spawned" || now < p.anchor || now >= p.deadline {
+		return ErrAgent
+	}
+	p.state = "spawn_claimed"
+	return start()
+}

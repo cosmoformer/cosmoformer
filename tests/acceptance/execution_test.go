@@ -32,9 +32,9 @@ type executionFixture struct {
 	secret     string
 }
 
-// Production admission and scheduling remain source-only. Only this test fixture
-// installs a synthetic execution claim, with real FKs/reservations/custody, after
-// the real source-only worker has finished. It never launches a native process.
+// Protocol-focused tests install synthetic execution claims with real foreign
+// keys, reservations and custody. The separate planning journeys use actual
+// admission and scheduling with injected native/AWS I/O.
 func newExecutionFixture(t *testing.T) *executionFixture {
 	t.Helper()
 	return newExecutionFixtureForSource(t, map[string]any{"kind": "branch"})
@@ -50,6 +50,7 @@ func newExecutionFixtureForSource(t *testing.T, source map[string]any) *executio
 		t.Fatal(e)
 	}
 	f.agent.HTTP.Transport = f.wire.base
+	f.exec(t, `UPDATE cosmoformer.stacks SET assessment='compatible' WHERE id=$1`, f.stack)
 	var oldSpec, prepared []byte
 	var operation, run, instance string
 	if e := f.db.Owner.QueryRow(ctx, `SELECT wi.assignment_spec,wi.resolved_preflight,a.operation_id::text,o.run_id::text,a.budget_platform_instance::text FROM cosmoformer.attempts a JOIN cosmoformer.operations o ON o.id=a.operation_id JOIN cosmoformer.work_items wi ON wi.id=a.work_item_id WHERE a.stack_id=$1`, f.stack).Scan(&oldSpec, &prepared, &operation, &run, &instance); e != nil {
@@ -458,8 +459,8 @@ func TestExecutionCommandEvidenceAndFullOrder(t *testing.T) {
 		commands = append(commands, runs.CommandResult{Ordinal: p.Ordinal, Permission: p.Permission, Status: "stopped", Exit: p.Exit, Stop: p})
 	}
 	result := runs.ExecutionResult{Outcome: "success", Commands: commands, Artifacts: []string{schemaID, binaryID}, PreInitDigest: runs.Digest(f.pre), ManifestDigest: seal.Digest, LogFinal: &runs.LogFinal{Stream: "console", LastSequence: -1, Complete: true}}
-	// Native plan analysis/readiness is outside this branch: protocol facts alone
-	// must never fabricate a successful or reviewable plan.
+	// Command stop facts alone cannot substitute for the complete retained
+	// evidence required by the planning pipeline.
 	f.transition(t, "result", result, 409)
 	result.Outcome = "failure"
 	f.transition(t, "result", result, 200)

@@ -141,14 +141,11 @@ func (c *Coordinator) commandEvent(ctx context.Context, tx pgx.Tx, a runs.Assign
 	return false, e
 }
 
-func (c *Coordinator) executionResult(ctx context.Context, tx pgx.Tx, a runs.Assignment, m runs.Message, p runs.ExecutionResult, pre, sealed string, permitted bool, out *runs.Transition) (bool, error) {
+func (c *Coordinator) executionResult(ctx context.Context, tx pgx.Tx, a runs.Assignment, m runs.Message, p runs.ExecutionResult, pre, sealed string, permitted bool, planning *planningEvidence, out *runs.Transition) (bool, error) {
 	if p.Commands == nil || p.Artifacts == nil || len(p.Commands) > 4 || len(p.Artifacts) > 128 || p.PreInitDigest != pre || p.ManifestDigest != sealed {
 		return false, runs.Fail("RESULT_IDENTITY_MISMATCH")
 	}
-	if p.Outcome == "success" {
-		return false, runs.Fail("NATIVE_PLANNING_PIPELINE_UNAVAILABLE")
-	}
-	if p.Outcome != "failure" && p.Outcome != "preparation_failed" && p.Outcome != "cancelled" && p.Outcome != "not_executed" && p.Outcome != "unknown" {
+	if p.Outcome != "success" && p.Outcome != "failure" && p.Outcome != "preparation_failed" && p.Outcome != "cancelled" && p.Outcome != "not_executed" && p.Outcome != "unknown" {
 		return false, runs.Fail("INVALID_REQUEST")
 	}
 	if p.Outcome == "unknown" {
@@ -210,7 +207,7 @@ func (c *Coordinator) executionResult(ctx context.Context, tx pgx.Tx, a runs.Ass
 	// from an earlier preparation attempt cannot substitute for this attestation.
 	for _, id := range p.Artifacts {
 		var valid bool
-		if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM cosmoformer.artifacts WHERE id=$1 AND attempt_id=$2 AND state='finalized' AND NOT EXISTS(SELECT FROM cosmoformer.cleanup_claims WHERE artifact_id=$1))`, id, m.AttemptID).Scan(&valid); e != nil {
+		if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM cosmoformer.artifacts WHERE id=$1 AND attempt_id=$2 AND (state='finalized' OR $3::boolean AND state='unavailable') AND NOT EXISTS(SELECT FROM cosmoformer.cleanup_claims WHERE artifact_id=$1))`, id, m.AttemptID, p.Outcome != "success").Scan(&valid); e != nil {
 			return false, e
 		}
 		if !valid {
@@ -226,6 +223,11 @@ func (c *Coordinator) executionResult(ctx context.Context, tx pgx.Tx, a runs.Ass
 	}
 	if p.Outcome == "cancelled" && !cancelled {
 		return false, runs.Fail("CANCEL_EVIDENCE_REQUIRED")
+	}
+	if p.Outcome == "success" {
+		if e = c.finalizePlan(ctx, tx, a, m, p, planning); e != nil {
+			return false, e
+		}
 	}
 	if e = c.executionLogFinal(ctx, tx, m.AttemptID, p.LogFinal); e != nil {
 		return false, e
@@ -259,6 +261,12 @@ func (c *Coordinator) executionResult(ctx context.Context, tx pgx.Tx, a runs.Ass
 		return false, e
 	}
 	reason := "EXECUTION_FAILED"
+	if p.Outcome == "success" {
+		reason = "PLAN_READY"
+		if !planning.Analysis.Changes.HasChanges() {
+			reason = "NO_CHANGES"
+		}
+	}
 	if p.Outcome == "preparation_failed" {
 		reason = "PREPARATION_FAILED"
 	}
@@ -271,8 +279,19 @@ func (c *Coordinator) executionResult(ctx context.Context, tx pgx.Tx, a runs.Ass
 	if _, e = tx.Exec(ctx, `UPDATE cosmoformer.operations SET terminal_reason=$2 WHERE id=$1`, a.OperationID, reason); e != nil {
 		return false, e
 	}
+	if p.Outcome != "success" && p.Outcome != "preparation_failed" {
+		if _, e = tx.Exec(ctx, `UPDATE cosmoformer.plans SET status='unsupported',invalidation_reason=$2,revision=revision+1 WHERE attempt_id=$1 AND status='assembling'`, m.AttemptID, reason); e != nil {
+			return false, e
+		}
+		if _, e = tx.Exec(ctx, `UPDATE cosmoformer.artifact_holds SET released_at=clock_timestamp() WHERE owner_kind='plan' AND owner_id IN(SELECT id FROM cosmoformer.plans WHERE attempt_id=$1 AND status='unsupported') AND released_at IS NULL`, m.AttemptID); e != nil {
+			return false, e
+		}
+	}
 	out.AttemptState = "terminal"
 	out.OperationStatus = "failed"
+	if p.Outcome == "success" {
+		out.OperationStatus = "succeeded"
+	}
 	if p.Outcome == "cancelled" {
 		out.OperationStatus = "cancelled"
 	}

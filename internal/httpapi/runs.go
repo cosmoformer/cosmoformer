@@ -11,6 +11,7 @@ import (
 	"github.com/cosmoformer/cosmoformer/internal/bitbucket"
 	"github.com/cosmoformer/cosmoformer/internal/catalog"
 	"github.com/cosmoformer/cosmoformer/internal/coordinator"
+	"github.com/cosmoformer/cosmoformer/internal/plan"
 	"github.com/cosmoformer/cosmoformer/internal/runs"
 	"github.com/cosmoformer/cosmoformer/internal/store"
 	"github.com/danielgtaylor/huma/v2"
@@ -44,6 +45,7 @@ type SyncOutput struct {
 type PlanInput struct {
 	OrgIDPath
 	Body struct {
+		Intent string `json:"intent,omitempty" enum:"source_check,native_plan"`
 		Source struct {
 			Kind string `json:"kind" enum:"branch,pr"`
 			PR   int    `json:"pr_number,omitempty" minimum:"1"`
@@ -73,6 +75,7 @@ type StackPublic struct {
 	Commit        string `json:"commit"`
 	Archived      bool   `json:"archived"`
 	CanPlan       bool   `json:"can_plan"`
+	CanNativePlan bool   `json:"can_native_plan"`
 }
 
 func (a *Server) registerSourceActions(api huma.API) {
@@ -155,18 +158,19 @@ func (a *Server) registerSourceActions(api huma.API) {
 			if e != nil {
 				return e
 			}
-			rows, e := tx.Query(ctx, `SELECT s.id::text,s.display_name,s.project_id::text,s.environment_id::text,r.commit,s.archived FROM cosmoformer.stacks s JOIN cosmoformer.stack_revisions r ON r.id=s.effective_revision_id ORDER BY s.display_name,s.id`)
+			rows, e := tx.Query(ctx, `SELECT s.id::text,s.display_name,s.project_id::text,s.environment_id::text,r.commit,s.archived,s.assessment='compatible' FROM cosmoformer.stacks s JOIN cosmoformer.stack_revisions r ON r.id=s.effective_revision_id ORDER BY s.display_name,s.id`)
 			if e != nil {
 				return e
 			}
 			defer rows.Close()
 			for rows.Next() {
 				var s StackPublic
-				if e = rows.Scan(&s.ID, &s.Name, &s.ProjectID, &s.EnvironmentID, &s.Commit, &s.Archived); e != nil {
+				if e = rows.Scan(&s.ID, &s.Name, &s.ProjectID, &s.EnvironmentID, &s.Commit, &s.Archived, &s.CanNativePlan); e != nil {
 					return e
 				}
 				if access.Allows(g, s.ProjectID, s.EnvironmentID, access.View) || access.Allows(g, s.ProjectID, s.EnvironmentID, access.Manage) {
 					s.CanPlan = access.Allows(g, s.ProjectID, s.EnvironmentID, access.Plan)
+					s.CanNativePlan = s.CanNativePlan && s.CanPlan
 					out.Body.Stacks = append(out.Body.Stacks, s)
 				}
 			}
@@ -267,7 +271,7 @@ func (a *Server) registerSourceActions(api huma.API) {
 			return nil, problem(ctx, 409, "This declaration is absent from the selected source.")
 		}
 		old := effective.Declaration
-		if proposed.ProjectID != old.ProjectID || proposed.EnvironmentID != old.EnvironmentID || proposed.Worker.ID != old.Worker.ID || proposed.Root != old.Root || proposed.Workspace != old.Workspace || proposed.Engine != old.Engine || proposed.TrackedBranch != old.TrackedBranch {
+		if proposed.ProjectID != old.ProjectID || proposed.EnvironmentID != old.EnvironmentID || proposed.Worker.ID != old.Worker.ID || proposed.Root != old.Root || proposed.Workspace != old.Workspace || proposed.BackendOwnerAccountID != old.BackendOwnerAccountID || proposed.Engine != old.Engine || proposed.TrackedBranch != old.TrackedBranch {
 			return nil, problem(ctx, 409, "Merge and sync resource identity changes before requesting preflight.")
 		}
 		proposed.Approvals.Minimum = max(proposed.Approvals.Minimum, old.Approvals.Minimum)
@@ -283,13 +287,37 @@ func (a *Server) registerSourceActions(api huma.API) {
 			if e = a.Coordinator.RequireObservation(ctx, tx, observation, factsRevision); e != nil {
 				return nil, e
 			}
+			if in.Body.Intent == "native_plan" {
+				var compatible bool
+				if e := tx.QueryRow(ctx, `SELECT assessment='compatible' FROM cosmoformer.stacks WHERE id=$1`, in.ID).Scan(&compatible); e != nil {
+					return nil, e
+				}
+				if !compatible {
+					return nil, problem(ctx, 409, "Execution compatibility has not been assessed for this stack.")
+				}
+			}
 			eff, e := coordinator.BuildSpec(ctx, tx, *proposed, repo)
 			if e != nil {
 				return nil, e
 			}
+			if in.Body.Intent == "native_plan" {
+				if a.Evidence == nil {
+					return nil, problem(ctx, 503, "Protected planning evidence storage is unavailable.")
+				}
+				if !plan.SupportedRuntime(eff.Runtime.Name, eff.Runtime.Version) {
+					return nil, problem(ctx, 409, "This runtime has no supported planning profile.")
+				}
+				var fixedSession bool
+				if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM cosmoformer.aws_connections WHERE id=$1 AND revision=$2 AND expected_bootstrap_principal IS NOT NULL AND session_seconds=3600 AND enabled)`, eff.AWS.ID, eff.AWS.Revision).Scan(&fixedSession); e != nil {
+					return nil, e
+				}
+				if !fixedSession {
+					return nil, problem(ctx, 409, "The fixed execution session metadata is incomplete.")
+				}
+			}
 			spec := coordinator.Spec(eff, rev, repo, r.URL, facts.Commit, observation.SubjectID, factsRevision)
 			// Coalesce only older unclaimed source work; never overwrite active attempts.
-			if _, e = tx.Exec(ctx, `UPDATE cosmoformer.operations SET status='superseded',revision=revision+1 WHERE stack_id=$1 AND kind='plan' AND status='queued' AND run_id IN(SELECT id FROM cosmoformer.runs WHERE source_subject_id=$2)`, in.ID, observation.SubjectID); e != nil {
+			if _, e = tx.Exec(ctx, `UPDATE cosmoformer.operations SET status='superseded',revision=revision+1 WHERE stack_id=$1 AND kind='plan' AND status='queued' AND native_planning=$3 AND NOT EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=cosmoformer.operations.id AND closed_at IS NULL) AND run_id IN(SELECT id FROM cosmoformer.runs WHERE source_subject_id=$2)`, in.ID, observation.SubjectID, in.Body.Intent == "native_plan"); e != nil {
 				return nil, e
 			}
 			if _, e = tx.Exec(ctx, `UPDATE cosmoformer.work_items SET status='retired' WHERE status='queued' AND operation_id IN(SELECT id FROM cosmoformer.operations WHERE stack_id=$1 AND status='superseded')`, in.ID); e != nil {
@@ -303,7 +331,7 @@ func (a *Server) registerSourceActions(api huma.API) {
 			if _, e = tx.Exec(ctx, `INSERT INTO cosmoformer.runs(id,org_id,stack_id,source_subject_id,source_facts_revision,source_commit,purpose,requester_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, run, in.Org, in.ID, observation.SubjectID, factsRevision, facts.Commit, purpose, actor.ID); e != nil {
 				return nil, e
 			}
-			if _, e = tx.Exec(ctx, `INSERT INTO cosmoformer.operations(id,org_id,run_id,stack_id,kind,status,priority,accepted_at,ordering_at,requester_id) VALUES($1,$2,$3,$4,'plan','queued',$5,clock_timestamp(),clock_timestamp(),$6)`, op, in.Org, run, in.ID, in.Body.Priority, actor.ID); e != nil {
+			if _, e = tx.Exec(ctx, `INSERT INTO cosmoformer.operations(id,org_id,run_id,stack_id,kind,status,priority,accepted_at,ordering_at,requester_id,native_planning) VALUES($1,$2,$3,$4,'plan','queued',$5,clock_timestamp(),clock_timestamp(),$6,$7)`, op, in.Org, run, in.ID, in.Body.Priority, actor.ID, in.Body.Intent == "native_plan"); e != nil {
 				return nil, e
 			}
 			if _, e = tx.Exec(ctx, `INSERT INTO cosmoformer.work_items(org_id,operation_id,phase,status,assignment_spec) VALUES($1,$2,'preflight','queued',$3)`, in.Org, op, jsonBytes(spec)); e != nil {
@@ -315,7 +343,11 @@ func (a *Server) registerSourceActions(api huma.API) {
 			out.Body.Revision = 1
 			out.Body.Status = "queued"
 			out.Body.OperationID = op
-			return out, store.Audit(ctx, tx, in.Org, actor.ID, "preflight.request", run)
+			action := "preflight.request"
+			if in.Body.Intent == "native_plan" {
+				action = "plan.request"
+			}
+			return out, store.Audit(ctx, tx, in.Org, actor.ID, action, run)
 		})
 	})
 }
