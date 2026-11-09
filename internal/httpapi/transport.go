@@ -30,10 +30,14 @@ func authenticationClient(r *http.Request) (string, bool) {
 			return "", false
 		}
 		ip, err := netip.ParseAddr(values[0])
-		if err != nil || ip.Zone() != "" || ip.IsUnspecified() {
+		if err != nil || ip.Zone() != "" {
 			return "", false
 		}
-		return "proxy:" + ip.Unmap().String(), true
+		ip = ip.Unmap()
+		if ip.IsUnspecified() {
+			return "", false
+		}
+		return "proxy:" + ip.String(), true
 	}
 	// TCP clients cannot select their identity through any forwarding header.
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -41,8 +45,12 @@ func authenticationClient(r *http.Request) (string, bool) {
 		return "", false
 	}
 	ip, err := netip.ParseAddr(host)
-	if err != nil || ip.Zone() != "" || ip.IsUnspecified() {
+	if err != nil || ip.Zone() != "" {
 		return "", false
 	}
-	return "peer:" + ip.Unmap().String(), true
+	ip = ip.Unmap()
+	if ip.IsUnspecified() {
+		return "", false
+	}
+	return "peer:" + ip.String(), true
 }

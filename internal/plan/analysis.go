@@ -808,23 +808,31 @@ func validValueBlock(m map[string]any, b *tfjson.SchemaBlock) bool {
 			if v == nil {
 				continue
 			}
-			if n.NestingMode == tfjson.SchemaNestingModeSingle || n.NestingMode == tfjson.SchemaNestingModeGroup {
+			switch n.NestingMode {
+			case tfjson.SchemaNestingModeSingle, tfjson.SchemaNestingModeGroup:
 				if obj(v) == nil || !validValueBlock(obj(v), n.Block) {
 					return false
 				}
-			} else if a, ok := v.([]any); ok {
+			case tfjson.SchemaNestingModeList, tfjson.SchemaNestingModeSet:
+				a, ok := v.([]any)
+				if !ok {
+					return false
+				}
 				for _, v := range a {
 					if obj(v) == nil || !validValueBlock(obj(v), n.Block) {
 						return false
 					}
 				}
-			} else if n.NestingMode == tfjson.SchemaNestingModeMap && obj(v) != nil {
+			case tfjson.SchemaNestingModeMap:
+				if obj(v) == nil {
+					return false
+				}
 				for _, v := range obj(v) {
 					if obj(v) == nil || !validValueBlock(obj(v), n.Block) {
 						return false
 					}
 				}
-			} else {
+			default:
 				return false
 			}
 			continue

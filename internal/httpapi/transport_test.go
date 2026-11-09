@@ -99,7 +99,7 @@ func TestPublicAuthUnixClientBudgetsAndInvalidMetadata(t *testing.T) {
 	send([]string{"::ffff:192.0.2.1"}, 429)
 	send([]string{"192.0.2.2"}, 204)
 	send(nil, 204) // owner-only direct IPC has separate admission
-	for _, values := range [][]string{{""}, {"localhost"}, {"192.0.2.2:9"}, {"192.0.2.2, 192.0.2.3"}, {"fe80::1%lo"}, {"0.0.0.0"}, {"::"}, {"192.0.2.2", "192.0.2.3"}} {
+	for _, values := range [][]string{{""}, {"localhost"}, {"192.0.2.2:9"}, {"192.0.2.2, 192.0.2.3"}, {"fe80::1%lo"}, {"::ffff:192.0.2.2%lo"}, {"0.0.0.0"}, {"::ffff:0.0.0.0"}, {"::"}, {"192.0.2.2", "192.0.2.3"}} {
 		send(values, 400)
 	}
 	for range 9 {
@@ -138,7 +138,7 @@ func TestPublicAuthTCPDisregardsForwardingClaims(t *testing.T) {
 }
 
 func TestAuthenticationClientCanonicalization(t *testing.T) {
-	for _, tc := range []struct{ peer, want string }{{"[::ffff:192.0.2.1]:1", "peer:192.0.2.1"}, {"[2001:db8:0::1]:9", "peer:2001:db8::1"}, {"@", ""}, {"localhost:1", ""}, {"[fe80::1%lo]:1", ""}, {"0.0.0.0:1", ""}} {
+	for _, tc := range []struct{ peer, want string }{{"[::ffff:192.0.2.1]:1", "peer:192.0.2.1"}, {"[2001:db8:0::1]:9", "peer:2001:db8::1"}, {"@", ""}, {"localhost:1", ""}, {"[fe80::1%lo]:1", ""}, {"[::ffff:192.0.2.1%lo]:1", ""}, {"0.0.0.0:1", ""}, {"[::ffff:0.0.0.0]:1", ""}} {
 		r := authRequest("POST", "/api/v1/session/login")
 		r.RemoteAddr = tc.peer
 		got, ok := authenticationClient(r)

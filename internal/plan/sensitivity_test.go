@@ -20,8 +20,11 @@ func TestMapBlockSchemaSensitivity(t *testing.T) {
 	cases := []struct {
 		name, mode                                string
 		attr, beforeMarker, afterMarker, register bool
+		wrongArray                                bool
 	}{
 		{name: "map_block_empty_markers", mode: "map"},
+		{name: "map_block_rejects_array", mode: "map", wrongArray: true},
+		{name: "map_attribute_rejects_array", mode: "map", attr: true, wrongArray: true},
 		{name: "map_attribute_empty_markers", mode: "map", attr: true},
 		{name: "list_block_empty_markers", mode: "list"},
 		{name: "single_block_empty_markers", mode: "single"},
@@ -33,7 +36,10 @@ func TestMapBlockSchemaSensitivity(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			attrs := map[string]any{"private": map[string]any{"type": "string", "sensitive": true}, "safe": map[string]any{"type": "string"}}
+			// Disable schema sensitivity in native-marker/registry controls so each
+			// preventing layer must work independently.
+			sensitive := !tc.beforeMarker && !tc.afterMarker && !tc.register
+			attrs := map[string]any{"private": map[string]any{"type": "string", "sensitive": sensitive}, "safe": map[string]any{"type": "string"}}
 			block := map[string]any{}
 			if tc.attr {
 				block["attributes"] = map[string]any{"items": map[string]any{"optional": true, "nested_type": map[string]any{"nesting_mode": tc.mode, "attributes": attrs}}}
@@ -45,6 +51,9 @@ func TestMapBlockSchemaSensitivity(t *testing.T) {
 				t.Fatal("schema encoding")
 			}
 			wrap := func(value any) any {
+				if tc.wrongArray {
+					return []any{value}
+				}
 				switch tc.mode {
 				case "map":
 					return map[string]any{"slot": value, "other": value}
@@ -74,6 +83,12 @@ func TestMapBlockSchemaSensitivity(t *testing.T) {
 				}
 			}
 			out, err := plan.Analyze(raw, schema, plan.Options{Engine: "opentofu", Version: "1.13.8", ProfileID: plan.ProfileID("opentofu"), Providers: []runs.Provider{{Address: provider, Version: "1.0.0", Platform: "linux_amd64", Hashes: []string{"h1:fixture"}}}, ResourceIDs: map[string]string{addr: "11111111-1111-4111-8111-111111111111"}, Secrets: reg})
+			if tc.wrongArray {
+				if err == nil || out != nil {
+					t.Fatal("map collection accepted array-shaped native value")
+				}
+				return
+			}
 			if err != nil || out == nil {
 				t.Fatalf("exported Analyze rejected fixture: %v", err)
 			}

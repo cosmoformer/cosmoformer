@@ -26,13 +26,11 @@ export default defineConfig(({ command, isPreview }) => {
             proxy: {
                 '/api': {
                     target: api,
-                    configure(proxy) {
-                        proxy.on('proxyReq', (outgoing, request) => {
-                            // Overwrite caller claims with the actual frontend peer.
-                            // The API accepts this only over its owner-only Unix socket.
-                            outgoing.removeHeader('X-Cosmoformer-Client-IP');
-                            outgoing.setHeader('X-Cosmoformer-Client-IP', request.socket.remoteAddress ?? '');
-                        });
+                    bypass(request) {
+                        // Set trusted metadata before creating the outgoing request:
+                        // the proxyReq event is skipped for Expect: 100-continue.
+                        // The API accepts it only over its owner-only Unix socket.
+                        request.headers['x-cosmoformer-client-ip'] = request.socket.remoteAddress ?? '';
                     },
                 },
                 '/health': { target: api },

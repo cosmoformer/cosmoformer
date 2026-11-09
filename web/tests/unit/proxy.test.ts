@@ -32,11 +32,11 @@ test('API proxy overwrites caller client-address claims with its actual socket p
         });
         await frontend.listen();
         const port = (frontend.httpServer!.address() as AddressInfo).port;
-        for (const [claimed, connection] of [[['203.0.113.1'], 'close'], [['203.0.113.1', '198.51.100.1'], 'close'], [[''], 'close'], [['203.0.113.1'], 'X-Cosmoformer-Client-IP']] as const) {
+        for (const [claimed, connection, expectContinue] of [[['203.0.113.1'], 'close', false], [['203.0.113.1', '198.51.100.1'], 'close', false], [[''], 'close', false], [['203.0.113.1'], 'X-Cosmoformer-Client-IP', false], [['203.0.113.1'], 'close', true]] as const) {
             const observed = await new Promise<{ address: string; copies: number }>((resolve, reject) => {
                 const request = http.get({
                     host: '127.0.0.1', port, path: '/api/v1/session/login',
-                    headers: { 'X-Cosmoformer-Client-IP': [...claimed], 'X-Forwarded-For': '203.0.113.2', Connection: connection },
+                    headers: { 'X-Cosmoformer-Client-IP': [...claimed], 'X-Forwarded-For': '203.0.113.2', Connection: connection, ...(expectContinue ? { Expect: '100-continue' } : {}) },
                     timeout: 2000,
                 }, (response) => {
                     let body = '';
