@@ -1,5 +1,5 @@
-// Package worker implements only source preflight. There is no native state
-// command dispatcher, execution-input delivery or AWS session creation here.
+// Package worker runs source preflight and supplies protected input/permission
+// primitives. Native dispatch and AWS session creation remain unimplemented.
 package worker
 
 import (

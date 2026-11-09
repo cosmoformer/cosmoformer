@@ -168,6 +168,21 @@ export function cleanup(dir, execute = run) {
     }
     rmSync(dir, {recursive: true, force: true});
 }
+// The surviving parent owns the receipt so even a killed CLI cannot bypass
+// cleanup. The child's own finally still handles ordinary failures immediately.
+export function runStorageTest({parent = base, launch = spawnSync, execute = run, timeout = 590000} = {}) {
+    mkdirSync(parent, {recursive: true, mode: 0o700});
+    const dir = mkdtempSync(path.join(parent, 'test-'));
+    try {
+        const result = launch(process.execPath, [path.join(root, 'scripts/local-env.mjs'), 'test', dir], {encoding: 'utf8', timeout, maxBuffer: 8 * 1024 * 1024});
+        assert.ifError(result.error);
+        assert.equal(result.status, 0, result.stdout + '\n' + result.stderr);
+        return result.stdout;
+    } finally {
+        if (existsSync(path.join(dir, 'environment.json'))) cleanup(dir, execute);
+        else rmSync(dir, {recursive: true, force: true});
+    }
+}
 async function integration(dir) {
     // Exercise a real partially provisioned environment: container and volume
     // exist, but attachment failed before any storage process could start.
@@ -255,7 +270,9 @@ try {
         if (!args.length) throw Error('Supply OpenTofu arguments.');
         const r = tofu(dev, env, args, [0, 2], true); process.exitCode = r.code;
     } else if (action === 'test') {
-        const dir = mkdtempSync(path.join(base, 'test-'));
+        const supplied = process.argv[3];
+        if (supplied && (path.dirname(supplied) !== base || !/^test-[A-Za-z0-9]+$/.test(path.basename(supplied)))) throw Error('Invalid disposable test directory.');
+        const dir = supplied ?? mkdtempSync(path.join(base, 'test-'));
         try { await integration(dir); } finally { if (existsSync(path.join(dir, 'environment.json'))) cleanup(dir); else rmSync(dir, {recursive: true, force: true}); }
     } else throw Error('Use up, stop, tofu or test.');
 } catch (error) { console.error(error.message); process.exitCode = 1; }

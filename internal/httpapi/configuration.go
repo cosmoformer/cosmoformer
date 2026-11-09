@@ -91,10 +91,12 @@ type ResourceGrantInput struct {
 type AWSInput struct {
 	OrgPath
 	Body struct {
-		ProjectID     string `json:"project_id" format:"uuid"`
-		EnvironmentID string `json:"environment_id,omitempty" format:"uuid"`
-		RoleARN       string `json:"role_arn"`
-		Account       string `json:"expected_account" pattern:"^[0-9]{12}$"`
+		ProjectID      string `json:"project_id" format:"uuid"`
+		EnvironmentID  string `json:"environment_id,omitempty" format:"uuid"`
+		RoleARN        string `json:"role_arn"`
+		Bootstrap      string `json:"expected_bootstrap_principal,omitempty"`
+		SessionSeconds *int64 `json:"session_seconds,omitempty"`
+		Account        string `json:"expected_account" pattern:"^[0-9]{12}$"`
 	}
 }
 type SecretInput struct {
@@ -328,9 +330,12 @@ func (a *Server) registerConfiguration(api huma.API) {
 		if !regexp.MustCompile(`^arn:aws(-cn|-us-gov)?:iam::` + in.Body.Account + `:role/[A-Za-z0-9_+=,.@/-]+$`).MatchString(in.Body.RoleARN) {
 			return nil, problem(ctx, 422, "Use a role ARN in the expected account.")
 		}
+		if (in.Body.Bootstrap == "") != (in.Body.SessionSeconds == nil) || in.Body.SessionSeconds != nil && (*in.Body.SessionSeconds != 3600 || !regexp.MustCompile(`^arn:aws(-cn|-us-gov)?:iam::[0-9]{12}:role/[A-Za-z0-9_+=,.@/-]+$`).MatchString(in.Body.Bootstrap)) {
+			return nil, problem(ctx, 422, "Execution metadata requires an exact bootstrap role and a fixed 3600-second session.")
+		}
 		return mutate(a, ctx, in.Org, false, a.adminGuard(ctx, in.Org), func(tx pgx.Tx, actor store.Actor) (*IDResult, error) {
 			var id string
-			e := tx.QueryRow(ctx, `INSERT INTO cosmoformer.aws_connections(org_id,project_id,environment_id,role_arn,expected_account,enabled) VALUES($1,$2,$3,$4,$5,true) RETURNING id::text`, in.Org, in.Body.ProjectID, nilString(in.Body.EnvironmentID), in.Body.RoleARN, in.Body.Account).Scan(&id)
+			e := tx.QueryRow(ctx, `INSERT INTO cosmoformer.aws_connections(org_id,project_id,environment_id,role_arn,expected_account,expected_bootstrap_principal,session_seconds,enabled) VALUES($1,$2,$3,$4,$5,$6,$7,true) RETURNING id::text`, in.Org, in.Body.ProjectID, nilString(in.Body.EnvironmentID), in.Body.RoleARN, in.Body.Account, nilString(in.Body.Bootstrap), in.Body.SessionSeconds).Scan(&id)
 			return idResult(id), e
 		})
 	})

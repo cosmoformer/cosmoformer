@@ -88,7 +88,39 @@ type TransitionInput struct {
 	ID            string `path:"id" format:"uuid"`
 	Body          runs.Message
 }
-type TransitionOutput struct{ Body runs.Transition }
+
+// Explicit optional fields survive Huma's schema-link response transformer,
+// which rebuilds top-level structs and does not preserve MarshalJSON methods.
+type transitionBody struct {
+	Accepted           bool       `json:"accepted"`
+	NextSeq            int64      `json:"next_seq"`
+	AttemptState       string     `json:"attempt_state"`
+	OperationStatus    string     `json:"operation_status"`
+	Revision           int64      `json:"revision"`
+	Ready              bool       `json:"ready"`
+	NextCommandOrdinal int        `json:"next_command_ordinal"`
+	PermissionID       string     `json:"permission_id,omitempty"`
+	Ordinal            int64      `json:"ordinal,omitempty"`
+	Digest             string     `json:"command_spec_digest,omitempty"`
+	Platform           string     `json:"platform_instance,omitempty"`
+	RemainingMS        int64      `json:"remaining_ms,omitempty"`
+	Expires            *time.Time `json:"display_expires_at,omitempty"`
+}
+type TransitionOutput struct{ Body transitionBody }
+
+func transitionResponse(t runs.Transition) *TransitionOutput {
+	out := &TransitionOutput{Body: transitionBody{Accepted: t.Accepted, NextSeq: t.NextSeq, AttemptState: t.AttemptState, OperationStatus: t.OperationStatus, Revision: t.Revision, Ready: t.Ready, NextCommandOrdinal: t.NextCommandOrdinal}}
+	if p := t.Permission; p != nil {
+		out.Body.PermissionID = p.ID
+		out.Body.Ordinal = p.Ordinal
+		out.Body.Digest = p.Digest
+		out.Body.Platform = p.Platform
+		out.Body.RemainingMS = p.RemainingMS
+		out.Body.Expires = &p.Expires
+	}
+	return out
+}
+
 type SourceCredentialInput struct {
 	Authorization string `header:"Authorization"`
 	ID            string `path:"id" format:"uuid"`
@@ -108,6 +140,7 @@ type SourceCredentialOutput struct {
 }
 
 func (a *Server) registerWorker(api huma.API) {
+	a.registerExecutionInputs(api)
 	workerRegister(api, "/attempts/{id}/source-credential", "worker-source-credential", func(ctx context.Context, in *SourceCredentialInput) (*SourceCredentialOutput, error) {
 		out := &SourceCredentialOutput{}
 		e := a.Coordinator.WithAttempt(ctx, bearer(in.Authorization), in.Body.Identity, in.ID, func(tx pgx.Tx, w coordinator.Worker, assignment runs.Assignment) error {
@@ -197,17 +230,5 @@ func (a *Server) registerWorker(api huma.API) {
 		out.Body.Controls = []string{}
 		return out, workerError(ctx, e)
 	})
-	for _, route := range []string{"ack", "prepare-result", "result"} {
-		workerRegister(api, "/attempts/{id}/"+route, "worker-"+route, func(ctx context.Context, in *TransitionInput) (*TransitionOutput, error) {
-			if in.ID != in.Body.AttemptID {
-				return nil, problem(ctx, 422, "Attempt identity does not match.")
-			}
-			v, e := a.Coordinator.Transition(ctx, bearer(in.Authorization), route, in.Body)
-			out := &TransitionOutput{}
-			if v != nil {
-				out.Body = *v
-			}
-			return out, workerError(ctx, e)
-		})
-	}
+	a.registerOrderedRoutes(api)
 }

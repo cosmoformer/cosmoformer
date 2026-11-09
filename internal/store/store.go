@@ -15,7 +15,7 @@ import (
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
-const SchemaVersion int32 = 7
+const SchemaVersion int32 = 8
 
 var ErrForbidden = errors.New("insufficient permission")
 var ErrNotFound = errors.New("not found")
@@ -57,6 +57,13 @@ func (s *Store) Ready(ctx context.Context) error {
  AND EXISTS(SELECT FROM pg_constraint WHERE conrelid='cosmoformer.artifacts'::regclass AND conname='artifacts_finalized_identity' AND convalidated)
  AND (SELECT count(*)=3 FROM pg_trigger WHERE tgrelid IN ('cosmoformer.artifacts'::regclass,'cosmoformer.artifact_holds'::regclass,'cosmoformer.cleanup_claims'::regclass) AND tgname IN ('artifacts_integrity','artifact_holds_integrity','cleanup_claims_integrity') AND tgenabled='O')`).Scan(&safe); e != nil || !safe {
 		return errors.New("database evidence schema has incompatible protections")
+	}
+	if e = s.Pool.QueryRow(ctx, `SELECT
+ (SELECT count(*)=2 FROM pg_trigger WHERE (tgrelid='cosmoformer.attempts'::regclass AND tgname='native_protocol_identity' OR tgrelid='cosmoformer.artifacts'::regclass AND tgname='native_artifact_stage') AND tgenabled='O')
+ AND NOT has_table_privilege(current_user,'cosmoformer.backend_targets','SELECT,INSERT,UPDATE,DELETE')
+ AND has_function_privilege(current_user,'cosmoformer.execution_binding_matches(uuid,text,text,text,text,text)','EXECUTE')
+ AND has_function_privilege(current_user,'cosmoformer.execution_attention(uuid)','EXECUTE')`).Scan(&safe); e != nil || !safe {
+		return errors.New("database native protocol has incompatible protections")
 	}
 	return nil
 }

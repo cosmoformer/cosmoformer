@@ -340,3 +340,104 @@ func TestQueuePreservesUnicodeAtSegmentBoundary(t *testing.T) {
 		t.Fatal("Unicode split across segment boundary")
 	}
 }
+
+func TestStorageReadinessRejectsMissingSecurityConfiguration(t *testing.T) {
+	for _, failure := range []string{"head", "region", "versioning", "encryption", "public block", "missing version", "missing key", "unavailable object"} {
+		t.Run(failure, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == "HEAD":
+					if failure == "head" {
+						w.WriteHeader(403)
+						return
+					}
+					region := "eu-west-1"
+					if failure == "region" {
+						region = "eu-west-2"
+					}
+					w.Header().Set("X-Amz-Bucket-Region", region)
+				case r.URL.Query().Has("versioning"):
+					status := "Enabled"
+					if failure == "versioning" {
+						status = "Suspended"
+					}
+					fmt.Fprintf(w, "<VersioningConfiguration><Status>%s</Status></VersioningConfiguration>", status)
+				case r.URL.Query().Has("encryption"):
+					if failure == "encryption" {
+						fmt.Fprint(w, "<ServerSideEncryptionConfiguration/>")
+						return
+					}
+					fmt.Fprint(w, `<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>`)
+				case r.URL.Query().Has("publicAccessBlock"):
+					if failure == "public block" {
+						w.WriteHeader(403)
+						return
+					}
+					fmt.Fprint(w, `<PublicAccessBlockConfiguration><BlockPublicAcls>true</BlockPublicAcls><IgnorePublicAcls>true</IgnorePublicAcls><BlockPublicPolicy>true</BlockPublicPolicy><RestrictPublicBuckets>true</RestrictPublicBuckets></PublicAccessBlockConfiguration>`)
+				case r.Method == "PUT":
+					io.Copy(io.Discard, r.Body)
+				default:
+					if failure == "missing key" {
+						w.WriteHeader(404)
+						fmt.Fprint(w, `<Error><Code>NoSuchKey</Code></Error>`)
+					} else {
+						w.WriteHeader(503)
+					}
+				}
+			}))
+			defer srv.Close()
+			sdk := s3.NewFromConfig(aws.Config{Region: "eu-west-1", Credentials: credentials.NewStaticCredentialsProvider("synthetic", "synthetic", "")}, func(o *s3.Options) {
+				o.BaseEndpoint = aws.String(srv.URL)
+				o.UsePathStyle = true
+				o.RetryMaxAttempts = 1
+			})
+			st := &S3{sdk, Settings{"fixture", "eu-west-1", "123456789012"}}
+			switch failure {
+			case "missing version":
+				if _, e := st.Put(context.Background(), "key", strings.NewReader("data"), 4); e != ErrUnavailable {
+					t.Fatal(e)
+				}
+				if _, e := st.Get(context.Background(), "key", "null"); e != ErrUnavailable {
+					t.Fatal(e)
+				}
+			case "missing key":
+				if _, e := st.Get(context.Background(), "key", "exact"); e != ErrInvalid {
+					t.Fatal(e)
+				}
+			case "unavailable object":
+				if _, e := st.Get(context.Background(), "key", "exact"); e != ErrUnavailable {
+					t.Fatal(e)
+				}
+			default:
+				if e := st.Check(context.Background()); e != ErrUnavailable {
+					t.Fatal("unsafe storage accepted", e)
+				}
+			}
+		})
+	}
+}
+func TestTruncatedMultipartUploadAbortsItsOwnUpload(t *testing.T) {
+	aborted := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" && r.URL.Query().Has("uploads") {
+			fmt.Fprint(w, `<InitiateMultipartUploadResult><UploadId>owned-upload</UploadId></InitiateMultipartUploadResult>`)
+			return
+		}
+		if r.Method == "DELETE" && r.URL.Query().Get("uploadId") == "owned-upload" {
+			aborted = true
+			w.WriteHeader(204)
+			return
+		}
+		t.Error("incomplete body should not reach part upload or completion", r.Method, r.URL)
+	}))
+	defer srv.Close()
+	sdk := s3.NewFromConfig(aws.Config{Region: "eu-west-1", Credentials: credentials.NewStaticCredentialsProvider("synthetic", "synthetic", "")}, func(o *s3.Options) {
+		o.BaseEndpoint = aws.String(srv.URL)
+		o.UsePathStyle = true
+		o.RetryMaxAttempts = 1
+	})
+	st := &S3{sdk, Settings{"fixture", "eu-west-1", "123456789012"}}
+	if _, e := st.Put(context.Background(), "key", strings.NewReader("truncated"), PartSize+1); e != ErrUnavailable || !aborted {
+		t.Fatal("incomplete multipart was not aborted", e, aborted)
+	}
+}

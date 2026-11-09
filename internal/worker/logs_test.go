@@ -150,3 +150,81 @@ func TestCaptureIndependentUnicodeStreams(t *testing.T) {
 		t.Fatal("per-stream Unicode lost", got)
 	}
 }
+
+func TestAttemptLogCapturesShareCredentialRegistry(t *testing.T) {
+	a := &Agent{}
+	first, second := a.Logs(), a.Logs()
+	if first.Registry != second.Registry {
+		t.Fatal("attempt credential registry was replaced")
+	}
+	if e := first.Registry.Register("synthetic-sensitive"); e != nil {
+		t.Fatal(e)
+	}
+	if e := second.Drain(strings.NewReader("synthetic-sensitive output"), strings.NewReader(""), "console"); e != nil {
+		t.Fatal(e)
+	}
+	var text string
+	for _, s := range second.Queue.Take() {
+		if s.Text != nil {
+			text += *s.Text
+		}
+	}
+	if strings.Contains(text, "synthetic-sensitive") || !strings.Contains(text, "output") {
+		t.Fatal("shared credential was not redacted", text)
+	}
+}
+
+func TestPreviewUsesUnorderedAuthenticatedEndpoint(t *testing.T) {
+	attempt := runs.ID()
+	id := runs.Identity{WorkerID: runs.ID(), Generation: 7, Agent: runs.ID()}
+	text := "safe console"
+	calls := 0
+	a := &Agent{Origin: "https://fixture.invalid", Token: "synthetic", Identity: id, HTTP: &http.Client{Transport: logTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if r.Method != "POST" || r.URL.Path != "/worker/v1/attempts/"+attempt+"/log-preview" || r.Header.Get("Authorization") != "Bearer synthetic" || r.Header.Get("X-Worker-Generation") != "7" {
+			t.Error("preview identity", r.Method, r.URL.Path, r.Header)
+		}
+		var p map[string]any
+		if e := json.NewDecoder(r.Body).Decode(&p); e != nil {
+			t.Fatal(e)
+		}
+		if p["stream"] != "console" || p["epoch"] != "preview-epoch" || p["text"] != text || p["sequence"] != float64(0) {
+			t.Error("preview payload", p)
+		}
+		if _, ok := p["message_id"]; ok {
+			t.Error("preview consumed ordered message identity")
+		}
+		return reply(200, map[string]any{}), nil
+	})}}
+	segment := evidence.Segment{Sequence: 0, Start: 0, End: int64(len(text)), Text: &text}
+	if e := a.Preview(context.Background(), attempt, "preview-epoch", segment); e != nil {
+		t.Fatal(e)
+	}
+	if a.Preview(context.Background(), "invalid", "", segment) == nil {
+		t.Fatal("invalid attempt accepted")
+	}
+	segment.End++
+	if a.Preview(context.Background(), attempt, "", segment) == nil {
+		t.Fatal("invalid segment accepted")
+	}
+	if calls != 1 {
+		t.Fatal("invalid preview reached transport", calls)
+	}
+}
+
+func TestPublisherCancellationRetainsUnacknowledgedSegment(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	capture := NewLogCapture(&evidence.Registry{})
+	capture.Queue.Append([]byte("keep on failed send"))
+	a := &Agent{Origin: "https://fixture.invalid", HTTP: &http.Client{Transport: logTransport(func(*http.Request) (*http.Response, error) { cancel(); return nil, io.ErrUnexpectedEOF })}}
+	if e := capture.Publish(ctx, a, runs.ID()); e != context.Canceled {
+		t.Fatal(e)
+	}
+	if _, ok := capture.Queue.Peek(); !ok {
+		t.Fatal("cancelled send acknowledged undelivered logs")
+	}
+	if e := capture.Publish(ctx, a, runs.ID()); e != context.Canceled {
+		t.Fatal(e)
+	}
+}

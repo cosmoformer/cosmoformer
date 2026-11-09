@@ -111,7 +111,7 @@ func (a *Server) registerPreflights(api huma.API) {
 			if tag.RowsAffected() != 1 {
 				return nil, store.ErrConflict
 			}
-			if _, e = tx.Exec(ctx, `UPDATE cosmoformer.work_items SET status='queued',resolved_preflight=NULL,revision=revision+1 WHERE operation_id=$1 AND phase='preflight'`, in.ID); e != nil {
+			if _, e = tx.Exec(ctx, `UPDATE cosmoformer.work_items SET status='queued',resolved_preflight=NULL,revision=revision+1 WHERE id=(SELECT work_item_id FROM cosmoformer.attempts WHERE operation_id=$1 AND outcome='preparation_failed' ORDER BY created_at DESC,id DESC LIMIT 1)`, in.ID); e != nil {
 				return nil, e
 			}
 			return ok(), store.Audit(ctx, tx, in.Org, actor.ID, "preflight.retry", in.ID)

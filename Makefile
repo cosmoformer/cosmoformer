@@ -9,7 +9,7 @@ export PATH := $(firstword $(wildcard $(CURDIR)/.build/tools/node-v26.13.0-*/bin
 export COSMOFORMER_TEST_OWNER_DSN ?= $(shell cat .build/testdb/owner.dsn 2>/dev/null)
 export COSMOFORMER_TEST_MARKER_FILE ?= $(CURDIR)/.build/testdb/marker
 
-.PHONY: brand tools deps dev-setup dev-api dev-web dev-stop contract test-db-start test-db-stop test-unit test-integration test-source test-native test-scripts worker-image test-coverage test-go-coverage test-linux-coverage test-contract-coverage test-web-unit test-web-coverage test-web browser-server check
+.PHONY: brand tools deps dev-setup dev-api dev-web dev-stop contract test-db-start test-db-stop test-unit test-integration test-source test-native test-scripts worker-image test-coverage test-go-coverage test-linux-coverage test-contract-coverage test-web-unit test-web-coverage test-runtime-coverage test-web browser-server coverage-start test-overall-coverage check
 
 brand:
 	$(NODE) scripts/brand.mjs
@@ -114,12 +114,26 @@ test-native:
 	@$(NODE) --input-type=module -e "$$COSMOFORMER_NATIVE_TEST_SCRIPT"
 
 test-scripts:
-	COSMOFORMER_GO=$(GO) $(NODE) --test scripts/merge-go-coverage.test.mjs scripts/native-make.test.mjs scripts/workflow-lib.test.mjs scripts/local-api.test.mjs scripts/local-env.test.mjs web/scripts/contract.test.mjs
+	mkdir -p .build/coverage/workflows
+	COSMOFORMER_GO=$(GO) $(NODE) --test --experimental-test-coverage --test-coverage-include='scripts/*.mjs' --test-coverage-exclude='scripts/*.test.mjs' --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=.build/coverage/workflows/lcov.info scripts/check-go-coverage.test.mjs scripts/overall-coverage.test.mjs scripts/sonar-coverage.test.mjs scripts/merge-go-coverage.test.mjs scripts/native-make.test.mjs scripts/workflow-lib.test.mjs scripts/local-api.test.mjs scripts/local-env.test.mjs web/scripts/contract.test.mjs
 
 worker-image:
 	docker build --quiet --platform linux/amd64 --target worker -f deploy/worker/Dockerfile -t cosmoformer-worker:local .
 
-test-coverage: test-go-coverage test-web-coverage test-contract-coverage
+coverage-start:
+	$(NODE) scripts/sonar-coverage.mjs begin
+
+test-overall-coverage:
+	$(NODE) scripts/sonar-coverage.mjs check
+
+test-coverage:
+	$(MAKE) coverage-start
+	$(MAKE) test-go-coverage test-web-coverage test-contract-coverage test-scripts test-runtime-coverage
+
+# Existing integration checks, with coverage from their real Node child processes.
+test-runtime-coverage: local-image
+	mkdir -p .build/coverage/runtime
+	COSMOFORMER_GO=$(GO) $(NODE) --test --experimental-test-coverage --test-coverage-include='scripts/*.mjs' --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=.build/coverage/runtime/lcov.info scripts/runtime-coverage.test.mjs
 
 test-contract-coverage:
 	mkdir -p .build/coverage/contract
@@ -130,13 +144,14 @@ test-go-coverage: test-linux-coverage
 	mkdir -p .build/coverage
 	@set -eu; cover_dir=$$(mktemp -d "$(CURDIR)/.build/coverage/go-raw.XXXXXX"); \
 	trap 'rm -rf "$$cover_dir"' EXIT; \
-	COSMOFORMER_TEST_COVER_DIR="$$cover_dir" $(GO) test -race -count=1 -tags=integration -covermode=atomic -coverpkg=./internal/...,./cmd/... ./internal/... ./cmd/... ./tests/acceptance -args -test.gocoverdir="$$cover_dir"; \
+	COSMOFORMER_TEST_COVER_DIR="$$cover_dir" $(GO) test -race -count=1 -timeout=20m -tags=integration -covermode=atomic -coverpkg=./internal/...,./cmd/... ./internal/... ./cmd/... ./tests/acceptance -args -test.gocoverdir="$$cover_dir"; \
 	$(GO) tool covdata textfmt -i="$$cover_dir" -o=.build/coverage/go.host.out
 	mkdir -p .build/coverage/scripts
-	$(NODE) --test --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=.build/coverage/scripts/lcov.info scripts/merge-go-coverage.test.mjs
+	$(NODE) --test --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=.build/coverage/scripts/lcov.info scripts/merge-go-coverage.test.mjs scripts/check-go-coverage.test.mjs
 	$(NODE) scripts/merge-go-coverage.mjs .build/coverage/go.out .build/coverage/go.host.out .build/coverage/linux/source.out .build/coverage/linux/worker.out .build/coverage/linux/clock.out .build/coverage/linux/command.out
 	$(GO) tool cover -func=.build/coverage/go.out
 	$(GO) tool cover -html=.build/coverage/go.out -o=.build/coverage/go.html
+	$(NODE) scripts/check-go-coverage.mjs .build/coverage/go.out
 
 test-linux-coverage:
 	docker build --quiet --platform linux/amd64 --target source-coverage -f deploy/worker/Dockerfile -t cosmoformer-worker-source-coverage:local .
@@ -162,10 +177,11 @@ test-web: contract
 
 # Checks build local test images; none publishes or deploys resources.
 check:
-	$(MAKE) test-unit
-	$(MAKE) test-integration
-	$(MAKE) test-source
+	$(MAKE) coverage-start
+	$(MAKE) test-go-coverage
+	$(GO) vet ./...
 	$(MAKE) test-scripts
 	$(MAKE) test-native
-	$(MAKE) test-local
+	$(MAKE) test-runtime-coverage
 	$(MAKE) test-web
+	$(MAKE) test-contract-coverage

@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import {start, tofu, cleanup} from './local-env.mjs';
+import {spawnSync} from 'node:child_process';
+import {start, tofu, cleanup, runStorageTest} from './local-env.mjs';
 
 function directory(t) {
     const dir = mkdtempSync(path.join(tmpdir(), 'cosmoformer-local-env-'));
@@ -177,4 +178,37 @@ test('disposable cleanup finds invocation-specific runners and retains other env
     cleanup(dir, fixture.execute);
     assert.equal(fixture.resources.size, 1); assert.strictEqual(fixture.resources.get('container:foreign-runner'), foreign);
     assert.equal(existsSync(dir), false);
+});
+
+for (const outcome of ['timeout', 'failure', 'success']) test(`storage parent cleans its recorded resources after child ${outcome}`, t => {
+    const parent = directory(t);
+    let child, fixture;
+    const foreign = {owner: 'other-environment', invocation: 'active'};
+    const launch = (command, args, options) => {
+        assert.equal(command, process.execPath);
+        assert.equal(args[1], 'test');
+        assert.equal(options.timeout, 25);
+        child = args[2];
+        fixture = dockerFixture(child);
+        const env = {id: 'owned-fixture', container: 'owned-server', volume: 'owned-data', configVolume: 'owned-config', network: 'owned-internal', gateway: 'owned-gateway'};
+        writeFileSync(path.join(child, 'environment.json'), JSON.stringify(env));
+        for (const [kind, name] of [['container', env.container], ['volume', env.volume], ['volume', env.configVolume], ['network', env.network], ['network', env.gateway]]) fixture.resources.set(`${kind}:${name}`, {owner: env.id});
+        fixture.resources.set('container:owned-runner', {owner: env.id, invocation: 'interrupted'});
+        fixture.resources.set('container:foreign-runner', foreign);
+        if (outcome === 'timeout') return spawnSync(process.execPath, ['-e', 'setTimeout(() => {}, 10000)'], options);
+        return {status: outcome === 'success' ? 0 : null, stdout: 'synthetic output', stderr: ''};
+    };
+    const invoke = () => runStorageTest({parent, launch, timeout: 25, execute: (...args) => fixture.execute(...args)});
+    if (outcome === 'success') assert.equal(invoke(), 'synthetic output');
+    else assert.throws(invoke, outcome === 'timeout' ? /ETIMEDOUT/ : /synthetic output/);
+    assert.equal(existsSync(child), false);
+    assert.equal(fixture.resources.size, 1);
+    assert.strictEqual(fixture.resources.get('container:foreign-runner'), foreign);
+});
+
+test('storage parent removes its empty directory when launch fails before a receipt', t => {
+    const parent = directory(t);
+    let child;
+    assert.throws(() => runStorageTest({parent, launch(_command, args) { child = args[2]; throw Error('launch failed'); }, execute() { assert.fail('no resources were recorded'); }}), /launch failed/);
+    assert.equal(existsSync(child), false);
 });

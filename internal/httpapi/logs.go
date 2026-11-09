@@ -139,6 +139,7 @@ func (a *Server) registerLogs(api huma.API) {
 		}
 		cursor.Epoch = epoch
 		left := in.Limit
+	archiveRows:
 		for i, v := range rows {
 			if i == 100 || left <= 0 {
 				out.Body.More = true
@@ -167,6 +168,10 @@ func (a *Server) registerLogs(api huma.API) {
 						text := (*payload.Text)[offset:]
 						text, err = evidence.TextPrefix(text, left)
 						if err != nil {
+							if left < in.Limit {
+								out.Body.More = true
+								break archiveRows
+							}
 							return nil, problem(ctx, 422, "Increase the log byte limit or reset the cursor.")
 						}
 						s.Start += offset
@@ -193,6 +198,10 @@ func (a *Server) registerLogs(api huma.API) {
 				if s.End <= cursor.Next {
 					continue
 				}
+				if left <= 0 {
+					out.Body.More = true
+					break
+				}
 				if s.Start < cursor.Next {
 					if s.Text != nil {
 						v := (*s.Text)[cursor.Next-s.Start:]
@@ -206,6 +215,10 @@ func (a *Server) registerLogs(api huma.API) {
 						var e error
 						v, e = evidence.TextPrefix(v, left)
 						if e != nil {
+							if left < in.Limit {
+								out.Body.More = true
+								break
+							}
 							return nil, problem(ctx, 422, "Increase the log byte limit or reset the cursor.")
 						}
 						out.Body.More = true
@@ -217,7 +230,13 @@ func (a *Server) registerLogs(api huma.API) {
 				out.Body.Segments = append(out.Body.Segments, s)
 				cursor.Next = s.End
 				if left == 0 {
-					out.Body.More = true
+					out.Body.More = false
+					for _, pending := range preview {
+						if pending.End > cursor.Next {
+							out.Body.More = true
+							break
+						}
+					}
 					break
 				}
 			}

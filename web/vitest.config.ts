@@ -12,7 +12,7 @@ export default defineConfig({
         restoreMocks: true,
         coverage: {
             provider: 'v8',
-            include: ['app/**/*.{ts,tsx}', '../scripts/dev.mjs', '../scripts/tools.mjs'],
+            include: ['app/**/*.{ts,tsx}', '../scripts/dev.mjs', '../scripts/tools.mjs', '../scripts/workflows.mjs', '../scripts/doctor.mjs', '../scripts/brand.mjs'],
             allowExternal: true,
             exclude: ['app/.generated/**'],
             reportsDirectory: '../.build/coverage/web',
