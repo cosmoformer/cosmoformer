@@ -150,7 +150,7 @@ func run() error {
 			}
 		}
 		handler, _ := httpapi.NewWithOptions(s, c.Origin, options)
-		server := &http.Server{Addr: c.Listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}
+		server := &http.Server{Addr: c.Listen, Handler: handler, ConnContext: httpapi.ConnectionContext, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}
 		listener, e := listenAPI(c)
 		if e != nil {
 			return fmt.Errorf("cannot bind API listen address: %w", e)

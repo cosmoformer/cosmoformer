@@ -24,7 +24,17 @@ export default defineConfig(({ command, isPreview }) => {
                 key: readFileSync(path.join(dir, 'key.pem')),
             } : undefined,
             proxy: {
-                '/api': { target: api },
+                '/api': {
+                    target: api,
+                    configure(proxy) {
+                        proxy.on('proxyReq', (outgoing, request) => {
+                            // Overwrite caller claims with the actual frontend peer.
+                            // The API accepts this only over its owner-only Unix socket.
+                            outgoing.removeHeader('X-Cosmoformer-Client-IP');
+                            outgoing.setHeader('X-Cosmoformer-Client-IP', request.socket.remoteAddress ?? '');
+                        });
+                    },
+                },
                 '/health': { target: api },
             },
         },

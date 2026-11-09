@@ -1199,9 +1199,16 @@ func schemaSensitivity(block *tfjson.SchemaBlock, v any) any {
 			}
 		}
 		if n := block.NestedBlocks[k]; n != nil {
-			if obj(v) != nil {
+			switch n.NestingMode {
+			case tfjson.SchemaNestingModeMap:
+				children := map[string]any{}
+				for label, child := range obj(v) {
+					children[label] = schemaSensitivity(n.Block, child)
+				}
+				mask[k] = children
+			case tfjson.SchemaNestingModeSingle, tfjson.SchemaNestingModeGroup:
 				mask[k] = schemaSensitivity(n.Block, v)
-			} else if list(v) != nil {
+			case tfjson.SchemaNestingModeList, tfjson.SchemaNestingModeSet:
 				a := []any{}
 				for _, v := range list(v) {
 					a = append(a, schemaSensitivity(n.Block, v))
