@@ -8,7 +8,9 @@ Evidence storage and redacted logging are available as bounded backend/worker ca
 
 The native execution control protocol adds closed execution identities, protected secret-input delivery, immutable pre-init evidence, one-way manifest sealing, and ordered command permissions/events/results. Permissions retain their identity and decreasing elapsed-time budget across retries; uncertain execution retains ownership. Schema version 8 stores these facts without changing migrations 001–007.
 
-Normal worker admission and scheduling remain source-preflight-only. The protocol is exercised with isolated PostgreSQL and injected native evidence boundaries. AWS execution-role sessions, native launches, plan analysis/readiness, approvals, Apply and recovery workflows remain unavailable. There is no execution enablement flag.
+Normal worker admission and scheduling remain source-preflight-only. The protocol is exercised with isolated PostgreSQL and injected native evidence boundaries. Native launches, plan analysis/readiness, approvals, Apply and recovery workflows remain unavailable. There is no execution enablement flag.
+
+The AWS execution-access adapter is an explicit, disconnected preparation capability. It reads bootstrap credentials only from fixed-endpoint IMDSv2, verifies the approved role identity, requests one fixed 3600-second STS session with the generated backend-owner policy, verifies the resulting identity, and checks bucket owner/region. BOOTTIME deadlines include response delay and a five-minute stop margin; the adapter cannot renew credentials or extend an attempt's authority. The attempt redactor must accept all credential values before the adapter returns the five temporary AWS environment entries. Account/source-only startup and scheduling never call this adapter. Synthetic fixtures establish adapter behavior, not live IAM authorization; actual company compatibility remains `not_assessed`. See the [execution-access boundary](docs/operator-guide.md#aws-execution-access-adapter).
 
 ## Local development
 

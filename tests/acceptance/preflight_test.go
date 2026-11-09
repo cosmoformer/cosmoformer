@@ -223,6 +223,16 @@ func TestLocalSourcePreflightThroughWorkerAPI(t *testing.T) {
 	f := newPreflightFixture(t)
 	db, agent, ticks, org, token, wire := f.db, f.agent, f.ticks, f.org, f.token, f.wire
 	ctx := context.Background()
+	// The execution-access adapter must not expand production admission. Even
+	// a correctly enrolled worker cannot advertise execution or mixed phases.
+	for _, phases := range [][]string{{"execution"}, {"preflight", "execution"}} {
+		admission := agent.Admission
+		admission.Phases = phases
+		generation, e := coordinator.New(db.App, ticks).Admit(ctx, token, admission)
+		if generation != 0 || runs.Code(e) != "RUNTIME_UNSUPPORTED" {
+			t.Fatal("production execution admission enabled", e)
+		}
+	}
 	wire.beforeAck = func(m runs.Message) {
 		m.Seq = 3
 		m.MessageID = runs.ID()
