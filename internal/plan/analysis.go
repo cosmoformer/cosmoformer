@@ -372,6 +372,7 @@ func validBlock(b map[string]any) bool {
 	if b == nil {
 		return false
 	}
+	names := map[string]bool{}
 	for _, kind := range []string{"attributes", "block_types"} {
 		v, exists := b[kind]
 		if !exists {
@@ -381,7 +382,11 @@ func validBlock(b map[string]any) bool {
 		if m == nil {
 			return false
 		}
-		for _, v := range m {
+		for name, v := range m {
+			if names[name] {
+				return false
+			}
+			names[name] = true
 			item := obj(v)
 			if item == nil {
 				return false

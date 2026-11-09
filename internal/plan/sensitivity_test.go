@@ -20,9 +20,10 @@ func TestMapBlockSchemaSensitivity(t *testing.T) {
 	cases := []struct {
 		name, mode                                string
 		attr, beforeMarker, afterMarker, register bool
-		wrongArray                                bool
+		wrongArray, overlap                       bool
 	}{
 		{name: "map_block_empty_markers", mode: "map"},
+		{name: "attribute_block_name_overlap", mode: "single", overlap: true},
 		{name: "map_block_rejects_array", mode: "map", wrongArray: true},
 		{name: "map_attribute_rejects_array", mode: "map", attr: true, wrongArray: true},
 		{name: "map_attribute_empty_markers", mode: "map", attr: true},
@@ -38,13 +39,19 @@ func TestMapBlockSchemaSensitivity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Disable schema sensitivity in native-marker/registry controls so each
 			// preventing layer must work independently.
-			sensitive := !tc.beforeMarker && !tc.afterMarker && !tc.register
+			sensitive := !tc.beforeMarker && !tc.afterMarker && !tc.register && !tc.overlap
 			attrs := map[string]any{"private": map[string]any{"type": "string", "sensitive": sensitive}, "safe": map[string]any{"type": "string"}}
 			block := map[string]any{}
 			if tc.attr {
 				block["attributes"] = map[string]any{"items": map[string]any{"optional": true, "nested_type": map[string]any{"nesting_mode": tc.mode, "attributes": attrs}}}
 			} else {
 				block["block_types"] = map[string]any{"items": map[string]any{"nesting_mode": tc.mode, "block": map[string]any{"attributes": attrs}}}
+			}
+			if tc.overlap {
+				block["attributes"] = map[string]any{"items": map[string]any{
+					"type":      []any{"object", map[string]any{"private": "string", "safe": "string"}},
+					"sensitive": true,
+				}}
 			}
 			schema, err := json.Marshal(map[string]any{"format_version": "1.0", "provider_schemas": map[string]any{provider: map[string]any{"provider": map[string]any{"version": 0, "block": map[string]any{}}, "resource_schemas": map[string]any{"nested_item": map[string]any{"version": 0, "block": block}}}}})
 			if err != nil {
@@ -83,9 +90,9 @@ func TestMapBlockSchemaSensitivity(t *testing.T) {
 				}
 			}
 			out, err := plan.Analyze(raw, schema, plan.Options{Engine: "opentofu", Version: "1.13.8", ProfileID: plan.ProfileID("opentofu"), Providers: []runs.Provider{{Address: provider, Version: "1.0.0", Platform: "linux_amd64", Hashes: []string{"h1:fixture"}}}, ResourceIDs: map[string]string{addr: "11111111-1111-4111-8111-111111111111"}, Secrets: reg})
-			if tc.wrongArray {
+			if tc.wrongArray || tc.overlap {
 				if err == nil || out != nil {
-					t.Fatal("map collection accepted array-shaped native value")
+					t.Fatal("ambiguous schema or mismatched native collection accepted")
 				}
 				return
 			}
