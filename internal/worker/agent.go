@@ -1,5 +1,6 @@
 // Package worker runs source preflight and supplies protected input/permission
-// primitives. Native dispatch and AWS session creation remain unimplemented.
+// primitives. AWS session preparation is explicit and disconnected from dispatch;
+// native dispatch remains unimplemented.
 package worker
 
 import (

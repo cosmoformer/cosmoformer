@@ -7,6 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.14
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.20.6
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.7
+	github.com/aws/aws-sdk-go-v2/service/sts v1.51.7
 	github.com/aws/smithy-go v1.28.8
 	github.com/danielgtaylor/huma/v2 v2.40.0
 	github.com/hashicorp/hcl/v2 v2.25.0
