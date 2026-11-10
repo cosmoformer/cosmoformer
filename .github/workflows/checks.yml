@@ -5,10 +5,18 @@ on:
     branches: [main]
 permissions:
   contents: read
+concurrency:
+  group: checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+env:
+  GOTOOLCHAIN: local
+  GOPATH: ${{ github.workspace }}/.build/gopath
+  GOCACHE: ${{ github.workspace }}/.build/go-cache
 jobs:
-  local-reference:
+
+  backend:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:18.6-alpine@sha256:8a334ab9502c8ccb8d7dec4e83b36b5ce8ed7b396e585f1c86b0e69c416f4fca
@@ -16,9 +24,185 @@ jobs:
           POSTGRES_HOST_AUTH_METHOD: trust
           POSTGRES_DB: cosmoformer_test_control
         ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U postgres -d cosmoformer_test_control"
-          --health-interval 5s --health-timeout 5s --health-retries 12
+        options: --health-cmd "pg_isready -U postgres -d cosmoformer_test_control" --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/test-tools
+      - run: node scripts/dev.mjs ci-test-init ${{ job.services.postgres.id }}
+      - run: node scripts/ci-checks.mjs go backend
+      - run: go vet -tags=integration ./...
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-backend
+          path: .build/ci/artifact/
+          if-no-files-found: error
+          retention-days: 3
+          overwrite: true
+          include-hidden-files: true
+
+  acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    services:
+      postgres:
+        image: postgres:18.6-alpine@sha256:8a334ab9502c8ccb8d7dec4e83b36b5ce8ed7b396e585f1c86b0e69c416f4fca
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: cosmoformer_test_control
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U postgres -d cosmoformer_test_control" --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/test-tools
+      - run: node scripts/dev.mjs ci-test-init ${{ job.services.postgres.id }}
+      - run: node scripts/ci-checks.mjs go acceptance-${{ matrix.shard }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-acceptance-${{ matrix.shard }}
+          path: .build/ci/artifact/
+          if-no-files-found: error
+          retention-days: 3
+          overwrite: true
+          include-hidden-files: true
+
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/test-tools
+        with:
+          go: 'false'
+      - run: node scripts/ci-checks.mjs begin linux
+      - run: make test-linux-coverage
+      - run: node scripts/ci-checks.mjs seal linux
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-linux
+          path: .build/ci/artifact/
+          if-no-files-found: error
+          retention-days: 3
+          overwrite: true
+          include-hidden-files: true
+
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [opentofu, terraform]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/test-tools
+        with:
+          go: 'false'
+      - run: make test-native NATIVE_ENGINE=${{ matrix.engine }}
+
+  runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18.6-alpine@sha256:8a334ab9502c8ccb8d7dec4e83b36b5ce8ed7b396e585f1c86b0e69c416f4fca
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: cosmoformer_test_control
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U postgres -d cosmoformer_test_control" --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/test-tools
+      - run: node scripts/dev.mjs ci-test-init ${{ job.services.postgres.id }}
+      - run: node scripts/ci-checks.mjs begin runtime
+      - run: make test-runtime-coverage
+      - run: node scripts/ci-checks.mjs seal runtime
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-runtime
+          path: .build/ci/artifact/
+          if-no-files-found: error
+          retention-days: 3
+          overwrite: true
+          include-hidden-files: true
+
+  web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18.6-alpine@sha256:8a334ab9502c8ccb8d7dec4e83b36b5ce8ed7b396e585f1c86b0e69c416f4fca
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: cosmoformer_test_control
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U postgres -d cosmoformer_test_control" --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/test-tools
+        with:
+          web: 'true'
+      - run: node scripts/dev.mjs ci-test-init ${{ job.services.postgres.id }}
+      - run: node scripts/dev.mjs cert
+      - run: cd web && npx --no-install playwright install --with-deps chromium firefox
+      - run: node scripts/ci-checks.mjs begin web
+      - run: make test-web
+      - run: node scripts/ci-checks.mjs seal web
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-web
+          path: .build/ci/artifact/
+          if-no-files-found: error
+          retention-days: 3
+          overwrite: true
+          include-hidden-files: true
+
+  scripts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/test-tools
+        with:
+          web: 'true'
+      - run: node scripts/ci-checks.mjs begin scripts
+      - run: make test-scripts test-contract-coverage
+      - run: node scripts/ci-checks.mjs seal scripts
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-scripts
+          path: .build/ci/artifact/
+          if-no-files-found: error
+          retention-days: 3
+          overwrite: true
+          include-hidden-files: true
+
+  # Preserve the existing required check name. Failed, skipped or cancelled
+  # producers cannot silently reduce the test inventory or coverage inputs.
+  local-reference:
+    if: ${{ always() }}
+    needs: [backend, acceptance, linux, native, runtime, web, scripts]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
       sonarqube:
         image: sonarqube:26.11.0.134175-community@sha256:1ce197471f5f2bac347694a336862fd2c23e9f57c6edb46acebbfbe70f2c7d9c
         env:
@@ -29,18 +213,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: ./.github/actions/test-tools
         with:
-          go-version: '1.27.3'
-          cache: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+          go: 'false'
+      - name: Require every parallel job to succeed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: node scripts/ci-checks.mjs require-jobs
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          node-version: '26.13.0'
-      - run: make deps
-      - run: node scripts/dev.mjs ci-test-init ${{ job.services.postgres.id }}
-      - run: node scripts/dev.mjs cert
-      - run: cd web && npx --no-install playwright install --with-deps chromium firefox
-      - run: make check
+          pattern: coverage-*
+          path: .build/ci/incoming
+      - run: node scripts/ci-checks.mjs assemble .build/ci/incoming
       - name: Enforce overall coverage strictly above 80%
         run: make test-overall-coverage
         env:

@@ -1,0 +1,28 @@
+name: Pinned test tools
+description: Restore public dependency/build caches and install the existing pinned tools.
+inputs:
+  go:
+    description: Install Go and download the locked modules.
+    default: 'true'
+  web:
+    description: Install the locked frontend dependencies.
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: '26.13.0'
+        cache: ${{ inputs.web == 'true' && 'npm' || '' }}
+        cache-dependency-path: web/package-lock.json
+    - if: inputs.go == 'true'
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: '1.27.3'
+        cache: true
+    - if: inputs.go == 'true'
+      shell: bash
+      run: go mod download
+    - if: inputs.web == 'true'
+      shell: bash
+      run: cd web && npm ci --ignore-scripts
