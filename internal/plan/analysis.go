@@ -69,8 +69,9 @@ type Finding struct {
 	Coverage   string         `json:"coverage"`
 }
 type Resource struct {
-	// Validated native dispatch fact; never part of the serialized display.
+	// Validated native dispatch facts; never part of the serialized display.
 	classificationType string
+	classificationMode string
 	ID                 string       `json:"id"`
 	Address            string       `json:"address_display"`
 	Type               string       `json:"type"`
@@ -546,7 +547,7 @@ func analyze(raw []byte, o Options, s verifiedSchema) (*Result, error) {
 				}
 			}
 			if kind == "resource_drift" {
-				if str(rc["mode"]) == "managed" {
+				if r.classificationMode == "managed" {
 					if e = classify(&r, s.semantic[str(rc["provider_name"])]); e != nil {
 						return nil, e
 					}
@@ -555,7 +556,7 @@ func analyze(raw []byte, o Options, s verifiedSchema) (*Result, error) {
 				out.Drift = append(out.Drift, r)
 				continue
 			}
-			if str(rc["mode"]) == "managed" {
+			if r.classificationMode == "managed" {
 				if e = classify(&r, s.semantic[str(rc["provider_name"])]); e != nil {
 					return nil, e
 				}
@@ -1306,7 +1307,7 @@ func normalizeResource(rc map[string]any, id string, reg *evidence.Registry, s v
 	if containsKnown(reg, prov) {
 		return Resource{}, ErrLeak
 	}
-	r := Resource{classificationType: str(rc["type"]), ID: id, Address: address, Type: typ, Provider: prov, Actions: actions(obj(rc["change"])), Paths: []PathChange{}, Findings: []Finding{}}
+	r := Resource{classificationType: str(rc["type"]), classificationMode: str(rc["mode"]), ID: id, Address: address, Type: typ, Provider: prov, Actions: actions(obj(rc["change"])), Paths: []PathChange{}, Findings: []Finding{}}
 	c := obj(rc["change"])
 	ps := s.typed.Schemas[str(rc["provider_name"])]
 	schema := ps.ResourceSchemas[str(rc["type"])]

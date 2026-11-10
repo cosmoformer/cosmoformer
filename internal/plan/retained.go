@@ -50,8 +50,9 @@ func VerifySanitized(expected, actual *Result) error {
 					}
 				}
 			}
-			// Drift has no apply findings; outputs have no resource semantic dispatch.
-			if pairIndex == 2 {
+			// Only independently validated managed resources receive semantic rules.
+			// Outputs and data sources have no resource findings, including in drift.
+			if pairIndex == 2 || e.classificationMode == "data" {
 				if len(a.Findings) != 0 {
 					return ErrInvalid
 				}

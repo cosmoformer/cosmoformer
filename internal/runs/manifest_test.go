@@ -67,6 +67,29 @@ func requireRunCode(t *testing.T, e error, code string) {
 	}
 }
 
+func TestReviewedInputsRepositoryRelativePaths(t *testing.T) {
+	s, r := reviewedFixture(t)
+	s.Source.Root = "infra"
+	for _, p := range []string{"backend.hcl", "vars.tfvars"} {
+		r.Files = append(r.Files, ManifestFile{Repository: s.Source.RepositoryID, Commit: s.Source.Commit, Path: "infra/" + p, Kind: "regular", Size: 21, Hash: Digest("different nested " + p)})
+	}
+	sortManifestFiles(r.Files)
+	if e := r.Validate(s, r.Stack, r.Epoch); e != nil {
+		t.Fatal("repository-relative inputs rejected for nested stack", e)
+	}
+	for _, backend := range []bool{true, false} {
+		bad := copyReviewed(t, r)
+		input := &bad.VarFiles[0]
+		if backend {
+			input = &bad.BackendFiles[0]
+		}
+		input.Size, input.Hash = 21, Digest("different nested "+input.Path)
+		if bad.Validate(s, r.Stack, r.Epoch) == nil {
+			t.Fatal("nested shadow input accepted as declared repository-relative input")
+		}
+	}
+}
+
 func TestReviewedClosureRejectsUnpinnedOrAmbiguousFiles(t *testing.T) {
 	s, r := reviewedFixture(t)
 	cases := map[string]func(*ReviewedInputs){

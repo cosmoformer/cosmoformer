@@ -725,3 +725,49 @@ func TestRetainedSanitizedRulesCannotBeOmitted(t *testing.T) {
 		})
 	}
 }
+
+func TestRetainedDataSourcesDoNotReceiveManagedRules(t *testing.T) {
+	s := fixtureSchema(t)
+	// A data-source schema has no managed ingress collection. The native matrix
+	// repeats this check against each pinned provider's complete actual schema.
+	ps := s.typed.Schemas["registry.opentofu.org/hashicorp/aws"]
+	if e := json.Unmarshal([]byte(`{"data_source_schemas":{"aws_security_group":{"version":0,"block":{"attributes":{"id":{"type":"string","computed":true}}}}}}`), ps); e != nil {
+		t.Fatal(e)
+	}
+	for _, kind := range []string{"resource_changes", "resource_drift"} {
+		for _, action := range []string{"no-op", "read"} {
+			t.Run(kind+"/"+action, func(t *testing.T) {
+				before := any(map[string]any{"id": "sg-synthetic"})
+				if action == "read" {
+					before = nil
+				}
+				entry := map[string]any{"address": "data.aws_security_group.fixture", "mode": "data", "type": "aws_security_group", "name": "fixture", "provider_name": "registry.opentofu.org/hashicorp/aws", "change": map[string]any{"actions": []string{action}, "before": before, "after": map[string]any{"id": "sg-synthetic"}, "after_unknown": false, "before_sensitive": false, "after_sensitive": false}}
+				raw, _ := json.Marshal(map[string]any{"format_version": "1.2", "terraform_version": "1.13.8", "planned_values": map[string]any{}, "configuration": map[string]any{}, kind: []any{entry}})
+				options := fixtureOptions(t, raw)
+				if e := options.Secrets.Register("aws_security_group"); e != nil {
+					t.Fatal(e)
+				}
+				expected, e := analyze(raw, options, s)
+				if e != nil {
+					t.Fatal(e)
+				}
+				encoded, _ := json.Marshal(expected)
+				var decoded Result
+				if json.Unmarshal(encoded, &decoded) != nil || VerifySanitized(expected, &decoded) != nil {
+					t.Fatal("valid retained data source rejected")
+				}
+				if bytes.Contains(encoded, []byte("aws_security_group")) || bytes.Contains(encoded, []byte("classification")) {
+					t.Fatal("private data-source dispatch facts serialized")
+				}
+				resources := decoded.Resources
+				if kind == "resource_drift" {
+					resources = decoded.Drift
+				}
+				resources[0].Findings = []Finding{{Rule: "CF-ACTION-DELETE"}}
+				if VerifySanitized(expected, &decoded) == nil {
+					t.Fatal("invented data-source warning accepted")
+				}
+			})
+		}
+	}
+}

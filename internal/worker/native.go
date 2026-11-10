@@ -124,10 +124,10 @@ func nativeArgs(s runs.ExecutionSpec, dir, tree, command string, lock bool) (str
 	switch command {
 	case "init":
 		for _, p := range s.BackendFiles {
-			if _, e := sourceInput(root, p); e != nil {
+			if _, e := sourceInput(tree, p); e != nil {
 				return "", "", nil, e
 			}
-			args = append(args, "-backend-config="+filepath.Join(root, filepath.FromSlash(p)))
+			args = append(args, "-backend-config="+filepath.Join(tree, filepath.FromSlash(p)))
 		}
 		if lock {
 			args = append(args, "-lockfile=readonly")
@@ -135,10 +135,10 @@ func nativeArgs(s runs.ExecutionSpec, dir, tree, command string, lock bool) (str
 	case "plan":
 		args = append(args, "-out="+filepath.Join(dir, "plan.bin"))
 		for _, p := range s.VarFiles {
-			if _, e := sourceInput(root, p); e != nil {
+			if _, e := sourceInput(tree, p); e != nil {
 				return "", "", nil, e
 			}
-			args = append(args, "-var-file="+filepath.Join(root, filepath.FromSlash(p)))
+			args = append(args, "-var-file="+filepath.Join(tree, filepath.FromSlash(p)))
 		}
 	case "show":
 		args = append(args, filepath.Join(dir, "plan.bin"))

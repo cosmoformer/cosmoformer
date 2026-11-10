@@ -7,9 +7,90 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cosmoformer/cosmoformer/internal/catalog"
 	"github.com/cosmoformer/cosmoformer/internal/runs"
 	"github.com/cosmoformer/cosmoformer/internal/source"
 )
+
+func TestPlanningRepositoryRelativeInputs(t *testing.T) {
+	for _, shadow := range []bool{false, true} {
+		t.Run(map[bool]string{false: "root files only", true: "different nested files"}[shadow], func(t *testing.T) {
+			a := inputAssignment(t, 0)
+			a.StackID, a.ApprovalFloor = runs.ID(), 1
+			s := a.Execution
+			s.Source.Root = "infra"
+			s.BackendFiles = []string{"config/state.hcl"}
+			s.VarFiles = []string{"config/first.tfvars", "config/last.tfvars"}
+			root, attempt := t.TempDir(), t.TempDir()
+			write := func(p, value string) {
+				t.Helper()
+				p = filepath.Join(root, p)
+				if e := os.MkdirAll(filepath.Dir(p), 0700); e != nil {
+					t.Fatal(e)
+				}
+				if e := os.WriteFile(p, []byte(value), 0600); e != nil {
+					t.Fatal(e)
+				}
+			}
+			backend := "bucket = \"synthetic-bucket\"\nkey = \"state\"\nregion = \"eu-west-1\"\nencrypt = true\nuse_lockfile = true\n"
+			write("infra/main.tf", "terraform {\n backend \"s3\" {}\n}\n")
+			write(s.BackendFiles[0], backend)
+			for _, p := range s.VarFiles {
+				write(p, "label = \""+p+"\"\n")
+			}
+			if shadow {
+				write("infra/"+s.BackendFiles[0], "key = \"unreserved-state\"\nuse_lockfile = false\n")
+				for _, p := range s.VarFiles {
+					write("infra/"+p, "label = \"wrong nested input\"\n")
+				}
+			}
+			declaration := catalog.Stack{ID: a.StackID, Name: "Synthetic nested stack", ProjectID: runs.ID(), EnvironmentID: runs.ID(), Root: s.Source.Root, TrackedBranch: "main", Engine: catalog.Engine{Name: s.Engine.Name, Version: s.Engine.Version}, Workspace: s.Workspace, BackendOwnerAccountID: s.Backend.ExpectedOwner, BackendFiles: s.BackendFiles, VarFiles: s.VarFiles, Worker: catalog.Pool{ID: s.Pool.ID}, Approvals: catalog.Approvals{Minimum: 1}}
+			inspection, e := source.InspectResolved(root, declaration, "", nil)
+			if e != nil || runs.Digest(inspection.Backend) != runs.Digest(s.Backend) {
+				t.Fatal("preflight did not inspect the repository-relative backend", e)
+			}
+			for _, command := range []string{"init", "plan"} {
+				_, cwd, args, e := nativeArgs(*s, attempt, root, command, false)
+				if e != nil || cwd != filepath.Join(root, "infra") {
+					t.Fatal("repository-relative inputs rejected or native cwd changed", command, e)
+				}
+				want := append([]string{}, runs.FixedFlags(command)...)
+				if command == "init" {
+					want = append(want, "-backend-config="+filepath.Join(root, s.BackendFiles[0]))
+				} else {
+					want = append(want, "-out="+filepath.Join(attempt, "plan.bin"))
+					for _, p := range s.VarFiles {
+						want = append(want, "-var-file="+filepath.Join(root, p))
+					}
+				}
+				if runs.Digest(args) != runs.Digest(want) {
+					t.Fatalf("native %s consumed different inputs: %v", command, args)
+				}
+			}
+			trees := map[string]checkoutTree{"root": {ID: s.Source.RepositoryID, Commit: s.Source.Commit, Dir: root}}
+			reviewed, e := reviewedInputs(a, trees, inspection)
+			if e != nil {
+				t.Fatal("repository-relative manifest rejected", e)
+			}
+			if reviewed.BackendFiles[0].Hash != hash([]byte(backend)) {
+				t.Fatal("manifest bound a different backend input")
+			}
+			for i, p := range s.VarFiles {
+				if reviewed.VarFiles[i].Path != p || reviewed.VarFiles[i].Hash != hash([]byte("label = \""+p+"\"\n")) {
+					t.Fatal("manifest changed variable-file identity or precedence")
+				}
+			}
+			for _, pair := range []struct{ command, file string }{{"init", s.BackendFiles[0]}, {"plan", s.VarFiles[0]}} {
+				if e := os.Remove(filepath.Join(root, pair.file)); e != nil {
+					t.Fatal(e)
+				}
+				if _, _, _, e := nativeArgs(*s, attempt, root, pair.command, false); e == nil {
+					t.Fatal("missing root input fell back to nested file", pair.command)
+				}
+			}
+		})
+	}
+}
 
 func TestPlanningMeasuresCompleteModuleTreesAndNativeCopies(t *testing.T) {
 	a := inputAssignment(t, 0)

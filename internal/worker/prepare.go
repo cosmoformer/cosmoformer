@@ -148,7 +148,7 @@ func reviewedInputs(assignment runs.Assignment, trees map[string]checkoutTree, i
 		for _, p := range pair.paths {
 			found := false
 			for _, f := range out.Files {
-				if f.Repository == s.Source.RepositoryID && f.Commit == s.Source.Commit && f.Path == path.Join(s.Source.Root, p) {
+				if f.Repository == s.Source.RepositoryID && f.Commit == s.Source.Commit && f.Path == p {
 					*pair.dest = append(*pair.dest, runs.ManifestInputFile{Path: p, Size: f.Size, Hash: f.Hash})
 					found = true
 					break
