@@ -79,6 +79,12 @@ test-unit:
 test-integration:
 	$(GO) test -race -tags=integration ./internal/store ./internal/coordinator ./internal/httpapi ./cmd/... ./tests/acceptance $(TEST_ARGS)
 
+# Preserve the same marked database selection and tool/cache environment as the
+# ordinary local checks when CI invokes an individual Go coverage producer.
+.PHONY: test-ci-go
+test-ci-go:
+	$(NODE) scripts/ci-checks.mjs go "$(CI_GO_PRODUCER)"
+
 # Local Linux verification: only loopback fixture servers remain reachable at run
 # time. No database, cloud credential, developer home or Docker socket is mounted.
 test-source:
@@ -104,18 +110,20 @@ const registry=r.engine==="terraform"?"registry.terraform.io":"registry.opentofu
 for(const x of r.test_provider_packages){const name=x.source_addresses?.[0]?.split("/").at(-1),q=pkgs[name];
 if(!q||seen.has(name)||x.version!==q[0]||x.sha256!==q[1]||x.arch!=="linux_amd64"||JSON.stringify(x.source_addresses)!==JSON.stringify([`$${registry}/hashicorp/$${name}`])||x.member!==`terraform-provider-$${name}_v$${q[0]}_x5`||x.archive_url!==`https://releases.hashicorp.com/terraform-provider-$${name}/$${q[0]}/terraform-provider-$${name}_$${q[0]}_linux_amd64.zip`)fail(); seen.add(name);}}
 const run=args=>{const p=spawnSync("docker",args,{stdio:"inherit"});if(p.error)throw p.error;if(p.status!==0)process.exit(p.status??1)};
-for(const r of m.runtimes){const a=r.engine_archive,tag=`cosmoformer-native-tests:$${r.engine}-$${r.version}`;
+const selected=process.env.COSMOFORMER_NATIVE_ENGINE||"";if(selected&&!Object.hasOwn(pins,selected))fail();
+for(const r of m.runtimes.filter(r=>!selected||r.engine===selected)){const a=r.engine_archive,tag=`cosmoformer-native-tests:$${r.engine}-$${r.version}`;
 run(["build","--platform=linux/amd64","--target=native-tests","-f","deploy/worker/Dockerfile",...Object.entries({ENGINE:r.engine,ENGINE_VERSION:r.version,ENGINE_URL:a.url,ENGINE_SHA256:a.sha256,ENGINE_MEMBER:a.member,BASE_IMAGE:r.base_image_ref}).flatMap(([k,v])=>["--build-arg",`$${k}=$${v}`]),"-t",tag,"."]);
-run(["run","--rm","--platform=linux/amd64","--network=none","--read-only","--tmpfs","/tmp:rw,exec,nosuid,nodev,size=1g",...Object.entries({COSMOFORMER_TEST_NATIVE:"1",COSMOFORMER_TEST_NATIVE_ENGINE:r.engine,COSMOFORMER_TEST_NATIVE_VERSION:r.version,COSMOFORMER_TEST_NATIVE_BINARY:`/usr/local/bin/$${a.member}`,COSMOFORMER_TEST_NATIVE_PROFILE_FILE:"/fixtures/runtimes.json",COSMOFORMER_TEST_NATIVE_PACKAGE_DIR:"/fixtures/provider-mirror"}).flatMap(([k,v])=>["-e",`$${k}=$${v}`]),tag]);}
+run(["run","--rm","--platform=linux/amd64","--network=none","--read-only","--cpus","2","--memory","3g","--pids-limit","256","--cap-drop","ALL","--security-opt","no-new-privileges","--ulimit","fsize=268435456:268435456","--ulimit","nofile=4096:4096","--tmpfs","/tmp:rw,exec,nosuid,nodev,size=1g",...Object.entries({COSMOFORMER_TEST_NATIVE:"1",COSMOFORMER_TEST_NATIVE_ENGINE:r.engine,COSMOFORMER_TEST_NATIVE_VERSION:r.version,COSMOFORMER_TEST_NATIVE_BINARY:`/usr/local/bin/$${a.member}`,COSMOFORMER_TEST_NATIVE_PROFILE_FILE:"/fixtures/runtimes.json",COSMOFORMER_TEST_NATIVE_PACKAGE_DIR:"/fixtures/provider-mirror"}).flatMap(([k,v])=>["-e",`$${k}=$${v}`]),tag]);}
 endef
 
 test-native: export COSMOFORMER_NATIVE_TEST_SCRIPT = $(NATIVE_TEST_SCRIPT)
+test-native: export COSMOFORMER_NATIVE_ENGINE = $(NATIVE_ENGINE)
 test-native:
 	@$(NODE) --input-type=module -e "$$COSMOFORMER_NATIVE_TEST_SCRIPT"
 
 test-scripts:
 	mkdir -p .build/coverage/workflows
-	COSMOFORMER_GO=$(GO) $(NODE) --test --experimental-test-coverage --test-coverage-include='scripts/*.mjs' --test-coverage-exclude='scripts/*.test.mjs' --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=.build/coverage/workflows/lcov.info scripts/check-go-coverage.test.mjs scripts/overall-coverage.test.mjs scripts/sonar-coverage.test.mjs scripts/merge-go-coverage.test.mjs scripts/native-make.test.mjs scripts/workflow-lib.test.mjs scripts/local-api.test.mjs scripts/local-env.test.mjs web/scripts/contract.test.mjs
+	COSMOFORMER_GO=$(GO) $(NODE) --test --experimental-test-coverage --test-coverage-include='scripts/*.mjs' --test-coverage-exclude='scripts/*.test.mjs' --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=.build/coverage/workflows/lcov.info scripts/check-go-coverage.test.mjs scripts/overall-coverage.test.mjs scripts/sonar-coverage.test.mjs scripts/merge-go-coverage.test.mjs scripts/ci-checks.test.mjs scripts/native-make.test.mjs scripts/workflow-lib.test.mjs scripts/local-api.test.mjs scripts/local-env.test.mjs web/scripts/contract.test.mjs
 
 worker-image:
 	docker build --quiet --platform linux/amd64 --target worker -f deploy/worker/Dockerfile -t cosmoformer-worker:local .

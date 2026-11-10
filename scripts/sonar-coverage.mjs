@@ -25,11 +25,17 @@ function sourceDigest(base, files) {
     }
     return hash.digest('hex');
 }
+export function coverageIdentity(base = root, run = execute) {
+    return {head: run('git', ['-C', base, 'rev-parse', 'HEAD']).trim(), digest: sourceDigest(base, sourceFiles(base, run))};
+}
 export function beginCoverage(base = root, run = execute) {
     const dir = coverage(base); mkdirSync(dir, {recursive: true});
-    const receipt = {started: Date.now(), head: run('git', ['-C', base, 'rev-parse', 'HEAD']).trim(), digest: sourceDigest(base, sourceFiles(base, run))};
+    const receipt = {started: Date.now(), ...coverageIdentity(base, run)};
     for (const file of [...reports, 'overall.json']) rmSync(path.join(dir, file), {force: true});
-    writeFileSync(path.join(dir, 'started.json'), JSON.stringify(receipt));
+    const marker = path.join(dir, 'started.json');
+    writeFileSync(marker, JSON.stringify(receipt));
+    receipt.started = statSync(marker).mtimeMs;
+    writeFileSync(marker, JSON.stringify(receipt));
     return receipt;
 }
 export function prepareSnapshot(base, run = execute) {
