@@ -1,3 +1,4 @@
+import { approvalSummary } from '../fixtures/review';
 import { act, fireEvent, screen } from '@testing-library/react';
 import { Route, Routes, useLocation } from 'react-router';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -140,6 +141,7 @@ function mountWorkspace(path: string) {
 it.each(['sidebar', 'project context', 'run breadcrumb'])('preserves environment through the %s project link and a refreshed project route', async link => {
     vi.mocked(fetch).mockImplementation(async input => {
         const path = String(input);
+        if (path.endsWith('/approvals')) return reply(approvalSummary);
         if (path.endsWith('/session')) return reply(reviewSession);
         if (path.endsWith('/projects')) return reply(projects);
         if (path.includes('/stacks?')) return reply({ stacks: [stackFixture] });

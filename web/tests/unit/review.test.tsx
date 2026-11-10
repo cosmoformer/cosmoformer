@@ -1,3 +1,4 @@
+import { approvalSummary } from '../fixtures/review';
 import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router';
@@ -23,6 +24,7 @@ beforeEach(() => {
         const path = String(input);
         if (options?.method !== 'GET') { mutations.push(JSON.parse(String(options?.body))); if (fail === 'mutation') return reply({ code: 'CONFLICT', message: 'Fresh action required.' }, status); return reply({ request_id: 'request', subject_id: run, revision: 1, status: 'queued', operation_id: reviewID(9) }); }
         if (fail && path.includes(fail)) return reply({ code: 'FORBIDDEN', message: 'Current access unavailable.' }, status);
+        if (path.endsWith('/approvals')) return reply(approvalSummary);
         if (path.endsWith('/session')) return reply(reviewSession);
         if (path.endsWith('/projects')) return reply(projectData);
         if (path.includes('/stacks?')) return reply({ stacks, ...(next ? { next_cursor: next } : {}) });

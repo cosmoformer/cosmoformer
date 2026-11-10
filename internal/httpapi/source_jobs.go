@@ -152,7 +152,8 @@ func (a *Server) reconcileSource(ctx context.Context, org, repo, kind string, pr
 		return e
 	}
 	facts, e := a.Bitbucket.Read(ctx, r.URL, r.ExternalID, r.Branch, pr, token)
-	if e != nil {
+	contextChanged := errors.Is(e, bitbucket.ErrContextChanged)
+	if e != nil && !contextChanged {
 		return e
 	}
 	facts.InventoryRevision = r.Revision
@@ -162,6 +163,9 @@ func (a *Server) reconcileSource(ctx context.Context, org, repo, kind string, pr
 	factsRevision, e := a.acceptSourceFacts(ctx, org, repo, r, observation, facts)
 	if e != nil {
 		return e
+	}
+	if contextChanged {
+		return bitbucket.ErrContextChanged
 	}
 	// Changed/closed facts revoke old authority even if the manifest cannot be
 	// read, parsed or imported. Inventory/work creation is a later transaction.

@@ -166,8 +166,9 @@ func (a *Server) registerConfiguration(api huma.API) {
 		var project string
 		var semantic, revision int64
 		var ciphertext []byte
+		var enabled bool
 		authorize := func(tx pgx.Tx, actor store.Actor) error {
-			if e := tx.QueryRow(ctx, `SELECT coalesce(project_id::text,''),semantic_revision,revision,encrypted_value FROM cosmoformer.secrets WHERE id=$1`, in.ID).Scan(&project, &semantic, &revision, &ciphertext); e != nil {
+			if e := tx.QueryRow(ctx, `SELECT coalesce(project_id::text,''),semantic_revision,revision,encrypted_value,enabled FROM cosmoformer.secrets WHERE id=$1`, in.ID).Scan(&project, &semantic, &revision, &ciphertext, &enabled); e != nil {
 				return store.ErrNotFound
 			}
 			return manager(ctx, tx, actor, in.Org, project, "")
@@ -191,7 +192,10 @@ func (a *Server) registerConfiguration(api huma.API) {
 		if len(plain) == 0 || len(plain) > 16384 || strings.ContainsRune(string(plain), 0) {
 			return nil, problem(ctx, 422, "Secret must be nonempty text of at most 16 KiB without NUL.")
 		}
-		newSemantic := semantic + 1
+		newSemantic := semantic
+		if in.Body.Value != nil || in.Body.Enabled != enabled {
+			newSemantic++
+		}
 		sealed, e := a.sealRevision(ctx, in.Org, in.ID, "managed_secret", newSemantic, plain)
 		if e != nil {
 			return nil, fail(ctx, e)
@@ -203,9 +207,6 @@ func (a *Server) registerConfiguration(api huma.API) {
 			}
 			if tag.RowsAffected() != 1 {
 				return nil, store.ErrConflict
-			}
-			if _, e = tx.Exec(ctx, `UPDATE cosmoformer.plans SET status='invalidated',invalidation_reason='SECRET_CHANGED',revision=revision+1 WHERE status='ready'`); e != nil {
-				return nil, e
 			}
 			return ok(), store.Audit(ctx, tx, in.Org, actor.ID, "secret.replace", in.ID)
 		})
@@ -219,9 +220,6 @@ func (a *Server) registerConfiguration(api huma.API) {
 				}
 				if tag.RowsAffected() != 1 {
 					return nil, store.ErrConflict
-				}
-				if _, e = tx.Exec(ctx, `UPDATE cosmoformer.plans SET status='invalidated',invalidation_reason='CONFIGURATION_CHANGED',revision=revision+1 WHERE status='ready'`); e != nil {
-					return nil, e
 				}
 				return ok(), store.Audit(ctx, tx, in.Org, actor.ID, resource.Path+".update", in.ID)
 			})

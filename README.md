@@ -8,9 +8,11 @@ Explicit Plan requests now progress through separate preflight and execution ass
 
 Readiness requires verified exact-version evidence, a sealed reviewed-input manifest, supported native analysis and an independent current managed-secret check. Scoped API reads expose sanitized Changes; raw evidence requires the separate raw-evidence grant. No changes is distinct from source-check success and includes output-only change detection. Logs retain redacted segments or explicit gaps. Missing responses, elapsed deadlines and signal delivery never prove stop or release uncertain ownership.
 
-Schema version **10** adds immutable explicit planning intent and ready-plan identities while preserving migrations 001–009. The reference engines are OpenTofu **1.13.8** and Terraform **1.17.1**, Linux amd64. Exact AWS provider **6.41.0** schema profiles provide the selected warnings; other validated allowed-registry providers have generic coverage. Unsupported KMS execution remains blocked.
+The run workspace supports exact-plan approval and own-vote withdrawal. An approval binds the plan ID/revision, retained manifest digest and Git commit after a fresh bounded Bitbucket read and current input/evidence checks. Counts use distinct enabled members with current scoped approval authority; eligible authors may count. Grant restoration can restore a current vote only while its plan remains valid. Withdrawal needs current scoped visibility and works during a provider outage. Review polling does not call Bitbucket or renew browser idle expiry. Apply remains unavailable even when the approval minimum is met.
 
-There is no production release. Approvals, Apply, recovery clearance, Force Stop UI, scheduled cleanup and deployment packaging remain unfinished. Synthetic PostgreSQL/worker tests and the separate network-isolated native matrices do not establish live AWS/IAM or company compatibility. See the [planning behavior and boundaries](docs/operator-guide.md#native-planning).
+Schema version **11** adds exact-plan approval event bindings, atomic vote projections, and semantic input invalidation while preserving migrations 001–010. The reference engines are OpenTofu **1.13.8** and Terraform **1.17.1**, Linux amd64. Exact AWS provider **6.41.0** schema profiles provide the selected warnings; other validated allowed-registry providers have generic coverage. Unsupported KMS execution remains blocked.
+
+There is no production release. Apply, recovery clearance, Force Stop UI, scheduled cleanup and deployment packaging remain unfinished. Synthetic PostgreSQL/worker tests and the separate network-isolated native matrices do not establish live AWS/IAM or company compatibility. See the [planning behavior and boundaries](docs/operator-guide.md#native-planning).
 
 ## Local development
 
@@ -93,7 +95,7 @@ Milestone 5 adds `internal/plan` for strict native evidence validation, sanitize
 
 Selected AWS rules cover destructive actions, RDS protection/backup/public settings, security-group ingress, VPC routes and network ACL rules. Network findings describe potential settings changes, not proven reachability or business outages. Exact provider/schema profiles are checked offline with both pinned engines and AWS **6.41.0**. Other allowed external providers receive validated generic action/value rendering with explicit absent semantic coverage. Default route-table/default ACL variants receive no related-type semantic fallback.
 
-`internal/testdata/plans.json` contains 126 synthetic cases. `internal/testdata/compatibility.json` records native schema fingerprints and extracted resource shapes; synthetic plans alone do not establish compatibility. See the [analysis limits and integration boundary](docs/operator-guide.md#plan-analysis-library-and-coverage) before using the library. Native planning and readiness are connected through explicit requests; approvals, Apply and recovery clearance remain unfinished. Company compatibility remains `not_assessed`.
+`internal/testdata/plans.json` contains 126 synthetic cases. `internal/testdata/compatibility.json` records native schema fingerprints and extracted resource shapes; synthetic plans alone do not establish compatibility. See the [analysis limits and integration boundary](docs/operator-guide.md#plan-analysis-library-and-coverage) before using the library. Native planning and readiness are connected through explicit requests; exact-plan approvals are available, while Apply and recovery clearance remain unfinished. Company compatibility remains `not_assessed`.
 
 ## Plan-review workspace
 

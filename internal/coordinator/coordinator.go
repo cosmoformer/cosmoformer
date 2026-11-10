@@ -507,18 +507,19 @@ func (c *Coordinator) AcceptObservation(ctx context.Context, tx pgx.Tx, org stri
 // already committed before manifest processing. A failed import cannot undo
 // source invalidation, and a newer observation cannot be overwritten by it.
 func (c *Coordinator) RequireObservation(ctx context.Context, tx pgx.Tx, o Observation, revision int64) error {
+	var current, ticket int64
+	if e := tx.QueryRow(ctx, `SELECT facts_revision,accepted_ticket FROM cosmoformer.source_subjects WHERE id=$1`, o.SubjectID).Scan(&current, &ticket); e != nil {
+		return e
+	}
+	if current != revision || ticket != o.Ticket {
+		return runs.Fail("SOURCE_CHANGED")
+	}
+	// Include the reference query's elapsed time in the freshness boundary.
 	now, e := c.Clock.Now()
 	if e != nil {
 		return e
 	}
 	if o.Instance != c.Instance || now < o.Started || now-o.Started >= 30*time.Second {
-		return runs.Fail("SOURCE_CHANGED")
-	}
-	var current, ticket int64
-	if e = tx.QueryRow(ctx, `SELECT facts_revision,accepted_ticket FROM cosmoformer.source_subjects WHERE id=$1`, o.SubjectID).Scan(&current, &ticket); e != nil {
-		return e
-	}
-	if current != revision || ticket != o.Ticket {
 		return runs.Fail("SOURCE_CHANGED")
 	}
 	return nil

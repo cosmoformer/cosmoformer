@@ -15,7 +15,7 @@ import (
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
-const SchemaVersion int32 = 10
+const SchemaVersion int32 = 11
 
 var ErrForbidden = errors.New("insufficient permission")
 var ErrNotFound = errors.New("not found")
@@ -74,6 +74,15 @@ func (s *Store) Ready(ctx context.Context) error {
 	}
 	if e = s.Pool.QueryRow(ctx, `SELECT (SELECT count(*)=2 FROM pg_trigger WHERE (tgrelid='cosmoformer.operations'::regclass AND tgname='planning_intent_identity' OR tgrelid='cosmoformer.plans'::regclass AND tgname='ready_plan_identity') AND tgenabled='O')`).Scan(&safe); e != nil || !safe {
 		return errors.New("database planning identities have incompatible protections")
+	}
+	if e = s.Pool.QueryRow(ctx, `SELECT
+ (SELECT count(*)=5 FROM pg_trigger WHERE (tgrelid='cosmoformer.approvals'::regclass AND tgname='approval_event_integrity' OR tgrelid='cosmoformer.plan_votes'::regclass AND tgname='plan_vote_integrity' OR tgrelid='cosmoformer.projects'::regclass AND tgname='approval_policy_revision' OR tgrelid='cosmoformer.runtime_catalog'::regclass AND tgname='invalidate_runtime_plans' OR tgrelid='cosmoformer.backend_targets'::regclass AND tgname='invalidate_epoch_plans') AND tgenabled='O')
+ AND (SELECT count(*)=14 FROM pg_trigger WHERE tgname='invalidate_reviewed_input' AND tgrelid IN ('cosmoformer.stacks'::regclass,'cosmoformer.projects'::regclass,'cosmoformer.environments'::regclass,'cosmoformer.repositories'::regclass,'cosmoformer.integrations'::regclass,'cosmoformer.worker_pools'::regclass,'cosmoformer.secrets'::regclass,'cosmoformer.source_credentials'::regclass,'cosmoformer.resource_grants'::regclass,'cosmoformer.aws_connections'::regclass,'cosmoformer.stack_bindings'::regclass,'cosmoformer.artifacts'::regclass,'cosmoformer.cleanup_claims'::regclass,'cosmoformer.recovery_cases'::regclass) AND tgenabled='O')
+ AND EXISTS(SELECT FROM pg_trigger WHERE tgrelid='cosmoformer.plans'::regclass AND tgname='release_invalid_plan_holds' AND tgenabled='O')
+ AND (SELECT count(*)=2 FROM pg_class WHERE oid IN ('cosmoformer.approvals'::regclass,'cosmoformer.plan_votes'::regclass) AND relrowsecurity AND relforcerowsecurity)
+ AND EXISTS(SELECT FROM pg_attribute WHERE attrelid='cosmoformer.approvals'::regclass AND attname='manifest_digest' AND NOT attisdropped)
+ AND EXISTS(SELECT FROM pg_attribute WHERE attrelid='cosmoformer.approvals'::regclass AND attname='source_commit' AND NOT attisdropped)`).Scan(&safe); e != nil || !safe {
+		return errors.New("database approvals have incompatible protections")
 	}
 	return nil
 }
