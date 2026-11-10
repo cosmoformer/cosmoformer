@@ -74,6 +74,7 @@ func TestPreflightFailureRecoveryAndRetryFencing(t *testing.T) {
 			f := newPreflightFixture(t)
 			ctx := context.Background()
 			run := f.agent.Git.Run
+			moduleUnreaped := false
 			if scenario.name == "directory" {
 				p := filepath.Join(t.TempDir(), "file")
 				if e := os.WriteFile(p, []byte("fixture"), 0600); e != nil {
@@ -89,6 +90,7 @@ func TestPreflightFailureRecoveryAndRetryFencing(t *testing.T) {
 					return nil, source.ErrProcess
 				}
 				if scenario.name == "module unreaped" && strings.HasPrefix(filepath.Base(dir), "module-") {
+					moduleUnreaped = true
 					return nil, source.ErrProcess
 				}
 				b, e := run(ctx, dir, args, env)
@@ -103,7 +105,7 @@ func TestPreflightFailureRecoveryAndRetryFencing(t *testing.T) {
 							return nil, e2
 						}
 						_, e = file.WriteString(`
-module "remote" { source = "git::https://bitbucket.org/fictional/repo.git?ref=` + strings.Repeat("a", 40) + `" }
+module "remote" { source = "git::https://bitbucket.org/fictional/repo.git?ref=` + strings.Repeat("b", 40) + `" }
 `)
 						file.Close()
 
@@ -128,6 +130,9 @@ module "remote" { source = "git::https://bitbucket.org/fictional/repo.git?ref=` 
 			op, status, revision := f.operation(t)
 			base := "/organizations/" + f.org
 			if scenario.name == "unreaped" || scenario.name == "module unreaped" {
+				if scenario.name == "module unreaped" && !moduleUnreaped {
+					t.Fatal("module checkout did not reach the uncertain-process fixture")
+				}
 				if e == nil || status != "preparing" {
 					t.Fatal("unproven stop released assignment", status, e)
 				}
