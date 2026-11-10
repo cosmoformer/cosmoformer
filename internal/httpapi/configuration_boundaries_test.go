@@ -95,6 +95,25 @@ func TestManagedSecretReferencesRemainRevisionedAndScopeBound(t *testing.T) {
 	}
 	f.browser(t, "PATCH", base+"/secrets/"+secret.ID, map[string]any{"expected_revision": 2, "enabled": true, "value": "invalid\x00value"}, 422)
 	f.browser(t, "PATCH", base+"/secrets/"+runs.ID(), map[string]any{"expected_revision": 1, "enabled": true, "value": "fictional"}, 404)
+	// Restoring availability advances identity again; unchanged-value ciphertext
+	// rotation must then retain that identity and its authenticated encryption AAD.
+	f.browser(t, "PATCH", base+"/secrets/"+secret.ID, map[string]any{"expected_revision": 2, "enabled": true}, 200)
+	var restored []byte
+	if e := f.DB.Owner.QueryRow(context.Background(), `SELECT semantic_revision,encrypted_value FROM cosmoformer.secrets WHERE id=$1`, secret.ID).Scan(&semantic, &restored); e != nil {
+		t.Fatal(e)
+	}
+	raw, e = f.Server.Cipher.Open(restored, cryptostore.AAD(f.Org, secret.ID, "managed_secret", uint64(semantic)))
+	if e != nil || string(raw) != "fictional-private-value" || semantic != 3 {
+		t.Fatal("re-enabling did not advance identity and preserve the value", semantic, e)
+	}
+	f.browser(t, "PATCH", base+"/secrets/"+secret.ID, map[string]any{"expected_revision": 3, "enabled": true}, 200)
+	if e := f.DB.Owner.QueryRow(context.Background(), `SELECT semantic_revision,encrypted_value FROM cosmoformer.secrets WHERE id=$1`, secret.ID).Scan(&semantic, &sealed); e != nil {
+		t.Fatal(e)
+	}
+	raw, e = f.Server.Cipher.Open(sealed, cryptostore.AAD(f.Org, secret.ID, "managed_secret", uint64(semantic)))
+	if e != nil || string(raw) != "fictional-private-value" || semantic != 3 || string(sealed) == string(restored) {
+		t.Fatal("ciphertext-only rotation changed identity or failed to reseal", semantic, e)
+	}
 }
 
 func TestEncryptedSettingsRejectNoncanonicalPathIDs(t *testing.T) {
