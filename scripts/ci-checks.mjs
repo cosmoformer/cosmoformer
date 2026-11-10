@@ -68,8 +68,14 @@ export function beginProducer(id, options) {
     requireProducer(id);
     const o = settings(options), started = {version: 1, id, ...identity(o), started: Date.now()};
     for (const file of producerReports[id]) rmSync(path.join(o.base, '.build/coverage', file), {force: true});
+    if (id === 'web') for (const file of contextRoots) rmSync(path.join(o.base, file), {recursive: true, force: true});
     rmSync(path.join(o.base, '.build/ci/artifact'), {recursive: true, force: true});
-    put(path.join(o.base, '.build/ci/start.json'), JSON.stringify(started));
+    const marker = path.join(o.base, '.build/ci/start.json');
+    put(marker, JSON.stringify(started));
+    // Compare filesystem timestamps with each other, rather than with Date.now:
+    // Linux mtime precision/clock granularity can lag the wall-clock sample.
+    started.started = lstatSync(marker).mtimeMs;
+    put(marker, JSON.stringify(started));
     return started;
 }
 export function sealProducer(id, options, tests) {

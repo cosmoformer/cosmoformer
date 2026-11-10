@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {cpSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync} from 'node:fs';
+import {chmodSync, cpSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {assembleCoverage, beginProducer, producerReports, requireSuccessfulJobs, runGoProducer, sealProducer, selectShard, shardCount, verifyTestEvents} from './ci-checks.mjs';
@@ -87,6 +87,26 @@ test('verified coverage is unioned once, restores only type context and passes e
     const {snapshot} = prepareSnapshot(f.base, f.run);
     assert.match(readFileSync(path.join(snapshot, 'web/app/.generated/api.ts'), 'utf8'), /generated types/);
     assert.ok(!readdirSync(path.join(snapshot, 'web/app/.generated')).includes('validators.js'));
+});
+test('freshness boundaries use the filesystem clock even when wall-clock samples lead it', t => {
+    const f = fixture(t), now = Date.now(); t.mock.method(Date, 'now', () => now + 1000);
+    const input = f.all();
+    assert.doesNotThrow(() => assembleCoverage(input, f.options));
+    assert.doesNotThrow(() => prepareSnapshot(f.base, f.run));
+});
+test('the actual CI Make target passes the marked test database and producer to Node', t => {
+    const f = fixture(t);
+    f.write('Makefile', readFileSync(new URL('../Makefile', import.meta.url)));
+    f.write('.build/testdb/owner.dsn', 'postgres://fixture@127.0.0.1:5432/cosmoformer_test_control');
+    f.write('node', `#!${process.execPath}\nconsole.log(JSON.stringify({args:process.argv.slice(2),dsn:process.env.COSMOFORMER_TEST_OWNER_DSN,marker:process.env.COSMOFORMER_TEST_MARKER_FILE}));\n`);
+    chmodSync(path.join(f.base, 'node'), 0o755);
+    const env = {...process.env}; delete env.COSMOFORMER_TEST_OWNER_DSN; delete env.COSMOFORMER_TEST_MARKER_FILE;
+    const result = spawnSync('make', ['--no-print-directory', 'test-ci-go', 'CI_GO_PRODUCER=acceptance-2', `NODE=${path.join(f.base, 'node')}`], {cwd: f.base, encoding: 'utf8', env});
+    assert.equal(result.status, 0, result.stderr);
+    const actual = JSON.parse(result.stdout.trim().split('\n').at(-1));
+    assert.deepEqual(actual.args, ['scripts/ci-checks.mjs', 'go', 'acceptance-2']);
+    assert.match(actual.dsn, /cosmoformer_test_control$/);
+    assert.equal(actual.marker, path.join(realpathSync(f.base), '.build/testdb/marker'));
 });
 for (const field of ['head', 'digest', 'run', 'attempt', 'id', 'version']) test(`rejects mismatched producer ${field}`, t => {
     const f = fixture(t), input = f.all(); f.edit('backend', value => { value[field] = 'wrong'; });

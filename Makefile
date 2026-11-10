@@ -79,6 +79,12 @@ test-unit:
 test-integration:
 	$(GO) test -race -tags=integration ./internal/store ./internal/coordinator ./internal/httpapi ./cmd/... ./tests/acceptance $(TEST_ARGS)
 
+# Preserve the same marked database selection and tool/cache environment as the
+# ordinary local checks when CI invokes an individual Go coverage producer.
+.PHONY: test-ci-go
+test-ci-go:
+	$(NODE) scripts/ci-checks.mjs go "$(CI_GO_PRODUCER)"
+
 # Local Linux verification: only loopback fixture servers remain reachable at run
 # time. No database, cloud credential, developer home or Docker socket is mounted.
 test-source:
