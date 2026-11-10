@@ -62,7 +62,8 @@ func runNative(ctx context.Context, in NativeCommand, spawn func(runs.CommandEve
 		werr.Close()
 		return runs.CommandEvent{}, source.ErrProcess
 	}
-	if e = in.Start(cmd.Start); e != nil {
+	s := supervisor(ctx)
+	if e = s.start(in.Permission.Ordinal, func() error { return in.Start(cmd.Start) }, func(kind string) bool { return signalProgram(cmd, kind) }); e != nil {
 		wout.Close()
 		werr.Close()
 		return runs.CommandEvent{}, source.ErrProcess
@@ -71,17 +72,12 @@ func runNative(ctx context.Context, in NativeCommand, spawn func(runs.CommandEve
 	werr.Close()
 	pid := int64(cmd.Process.Pid)
 	event := runs.CommandEvent{Ordinal: in.Permission.Ordinal, Permission: in.Permission.ID, Event: "spawned", PID: &pid, PGID: &pid}
-	var mu sync.Mutex
-	exited := false
-	wait := make(chan error, 1)
-	go func() { e := cmd.Wait(); mu.Lock(); exited = true; mu.Unlock(); wait <- e }()
-	interrupt := func() {
-		mu.Lock()
-		defer mu.Unlock()
-		if !exited {
-			_ = cmd.Process.Signal(syscall.SIGINT)
-		}
+	type completion struct {
+		err   error
+		empty bool
 	}
+	wait := make(chan completion, 1)
+	go func() { e, empty := waitProgram(cmd, s); wait <- completion{e, empty} }()
 	var bounded *boundedEvidence
 	drained := make(chan error, 1)
 	if in.Output != nil {
@@ -103,13 +99,13 @@ func runNative(ctx context.Context, in NativeCommand, spawn func(runs.CommandEve
 	reported := make(chan error, 1)
 	go func() { reported <- spawn(event) }()
 
-	var waitErr error
+	var completed completion
 	select {
-	case waitErr = <-wait:
+	case completed = <-wait:
 	case <-ctx.Done():
-		interrupt()
+		s.interrupt()
 		select {
-		case waitErr = <-wait:
+		case completed = <-wait:
 		case <-time.After(2 * time.Second):
 			<-reported // finish the sole ordered writer before returning
 			return event, source.ErrProcess
@@ -117,7 +113,7 @@ func runNative(ctx context.Context, in NativeCommand, spawn func(runs.CommandEve
 	}
 	stopped := event
 	stopped.Event = "stopped"
-	empty := syscall.Kill(-int(pid), 0) == syscall.ESRCH
+	empty := completed.empty
 	stopped.GroupEmpty = &empty
 	stopped.Pipes = "drained"
 	pipeUncertain := false
@@ -160,7 +156,7 @@ func runNative(ctx context.Context, in NativeCommand, spawn func(runs.CommandEve
 	if reportErr != nil {
 		return stopped, reportErr
 	}
-	_ = waitErr // exact native exit is in the returned event, including nonzero.
+	_ = completed.err // exact native exit is in the returned event, including nonzero.
 	return stopped, nil
 }
 

@@ -24,6 +24,9 @@ func (a *Agent) planNative(ctx, attemptCtx context.Context, assignment runs.Assi
 	defer stopPublish()
 	go logs.Publish(publishCtx, a, assignment.AttemptID)
 	finish := func(outcome string) (bool, error) {
+		if outcome != "not_executed" && supervisor(attemptCtx).wasRequested() && len(result.Commands) > 0 {
+			outcome = "cancelled"
+		}
 		stopPublish()
 		if e := logs.Flush(ctx, a, assignment.AttemptID); e != nil {
 			result.LogFinal = nil
@@ -233,6 +236,26 @@ func (a *Agent) planNative(ctx, attemptCtx context.Context, assignment runs.Assi
 			}
 			output.Close()
 		}
+		if event.Event == "" {
+			// The final exec boundary can lose a race to expiry or a delivered Cancel
+			// after the earlier Check. Only the still-unclaimed local launch state may
+			// provide never-started proof; a claimed/ambiguous spawn stays unresolved.
+			var discarded runs.CommandEvent
+			discardErr := ErrAgent
+			if now, clockErr := a.Clock.Now(); clockErr == nil {
+				discarded, discardErr = launch.DiscardExpired(a.Identity, assignment.AttemptID, now)
+			}
+			if discardErr != nil && supervisor(attemptCtx).wasRequested() {
+				discarded, discardErr = launch.DiscardCancelled(a.Identity, assignment.AttemptID)
+			}
+			if discardErr == nil {
+				if e = send("command-events", discarded); e != nil {
+					return false, e
+				}
+				result.Commands = append(result.Commands, runs.CommandResult{Ordinal: request.Ordinal, Permission: permission.ID, Status: "not_executed", Stop: discarded})
+				return finish("not_executed")
+			}
+		}
 		if event.Event != "stopped" || event.GroupEmpty == nil || !*event.GroupEmpty || errors.Is(runErr, source.ErrProcess) {
 			// Explicit uncertainty opens formal recovery and retains ownership.
 			result.Outcome = "unknown"
@@ -282,6 +305,13 @@ func (a *Agent) planNative(ctx, attemptCtx context.Context, assignment runs.Assi
 			}
 			result.ManifestDigest = runs.Digest(manifest)
 			if e = send("manifest-seal", runs.ManifestSeal{PreInitDigest: result.PreInitDigest, Artifact: manifestID, Digest: result.ManifestDigest, LockArtifact: lockID, Providers: manifest.Providers}); e != nil {
+				var rejected *Rejected
+				if errors.As(e, &rejected) && rejected.Status >= 400 && rejected.Status < 500 {
+					// A rejected seal issues no launch authority. Init is positively stopped;
+					// finish with the accepted pre-init identity, without claiming a seal.
+					result.ManifestDigest = ""
+					return finish("failure")
+				}
 				return false, e
 			}
 		}

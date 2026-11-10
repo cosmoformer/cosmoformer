@@ -70,6 +70,7 @@ type AWSRef struct {
 	Account  string `json:"expected_account"`
 }
 type PreflightSpec struct {
+	Recovery              *Provenance        `json:"recovery,omitempty"`
 	Version               int                `json:"version"`
 	Phase                 string             `json:"phase"`
 	StackRevisionID       string             `json:"stack_revision_id"`

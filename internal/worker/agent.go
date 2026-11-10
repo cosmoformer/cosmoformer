@@ -99,6 +99,8 @@ type Agent struct {
 	mu                        sync.Mutex
 	terms                     []string
 	redactor                  *evidence.Registry
+	active                    *processSupervisor
+	controlSend               func(string, any) error
 }
 
 func (a *Agent) call(ctx context.Context, path string, in, out any) error {
@@ -188,20 +190,39 @@ func (a *Agent) Run(ctx context.Context) error {
 				return
 			case <-ticker.C:
 				var out struct {
-					Contact  time.Time `json:"contact_received_at"`
-					Controls []string  `json:"controls"`
-					Paused   bool      `json:"paused"`
+					Contact  time.Time      `json:"contact_received_at"`
+					Controls []runs.Control `json:"controls"`
+					Paused   bool           `json:"paused"`
 				}
 				tick, e := a.Clock.Now()
 				if e != nil {
 					return
 				}
-				a.call(heartbeatCtx, "/heartbeat", map[string]any{"worker_id": a.Identity.WorkerID, "generation": a.Identity.Generation, "agent_instance": a.Identity.Agent, "request_id": runs.ID(), "agent_tick": tick.Milliseconds(), "phase": "preflight"}, &out)
+				body := map[string]any{"worker_id": a.Identity.WorkerID, "generation": a.Identity.Generation, "agent_instance": a.Identity.Agent, "request_id": runs.ID(), "agent_tick": tick.Milliseconds(), "phase": "supervising"}
+				a.mu.Lock()
+				active := a.active
+				a.mu.Unlock()
+				if active != nil {
+					active.mu.Lock()
+					body["attempt_id"] = active.attempt
+					body["current_command_ordinal"] = active.ordinal
+					active.mu.Unlock()
+				}
+				if e = a.call(heartbeatCtx, "/heartbeat", body, &out); e == nil {
+					a.deliverControls(out.Controls)
+				}
 			}
 		}
 	}()
 	for ctx.Err() == nil {
 		if e := a.RunOne(ctx); e != nil {
+			a.mu.Lock()
+			active := a.active
+			a.mu.Unlock()
+			if active != nil {
+				<-ctx.Done()
+				return ctx.Err()
+			}
 			return e
 		}
 	}
@@ -241,12 +262,17 @@ func (a *Agent) RunOne(ctx context.Context) error {
 	if hash(b) != assignment.Digest {
 		return ErrAgent
 	}
+	supervised := newSupervisor(a.Identity, assignment.AttemptID)
+	ctx = withSupervisor(ctx, supervised)
+	var sendMu sync.Mutex
 	seq := int64(1)
 	var last runs.Transition
 	var pending *runs.Message
 	var pendingRoute string
 	ambiguous := false
 	send := func(route string, payload any) error {
+		sendMu.Lock()
+		defer sendMu.Unlock()
 		raw, marshalErr := json.Marshal(payload)
 		if marshalErr != nil {
 			return ErrAgent
@@ -288,17 +314,40 @@ func (a *Agent) RunOne(ctx context.Context) error {
 			return ErrAgent
 		}
 		seq++
-		last = response
+		if route != "controls/ack" {
+			last = response
+		}
 		pending = nil
 		pendingRoute = ""
 		ambiguous = false
 		return nil
 	}
+	a.mu.Lock()
+	a.active = supervised
+	a.controlSend = send
+	a.mu.Unlock()
+	defer func() {
+		supervised.mu.Lock()
+		live := supervised.signal != nil
+		supervised.mu.Unlock()
+		if !live {
+			a.mu.Lock()
+			if a.active == supervised {
+				a.active = nil
+				a.controlSend = nil
+			}
+			a.mu.Unlock()
+		}
+	}()
 	preparationFailed := func(reason string) error {
 		if assignment.Phase == "execution" {
 			return send("result", runs.ExecutionResult{Outcome: "preparation_failed", Commands: []runs.CommandResult{}, Artifacts: []string{}, NoStateChild: true, Reaped: true})
 		}
-		return send("result", runs.Result{Outcome: "preparation_failed", Reason: reason, NoStateChild: true, Reaped: true})
+		outcome := "preparation_failed"
+		if supervised.wasRequested() {
+			outcome = "cancelled"
+		}
+		return send("result", runs.Result{Outcome: outcome, Reason: reason, NoStateChild: true, Reaped: true})
 	}
 	if e = send("ack", map[string]string{"work_item_id": assignment.WorkItemID}); e != nil {
 		return e

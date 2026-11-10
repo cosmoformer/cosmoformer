@@ -201,7 +201,7 @@ func (c *Coordinator) finalizePlan(ctx context.Context, tx pgx.Tx, a runs.Assign
 	if ttl < 1 || ttl > 720 {
 		return runs.Fail("PLAN_TTL_INVALID")
 	}
-	tag, e := tx.Exec(ctx, `WITH ready AS (SELECT clock_timestamp() AS at) UPDATE cosmoformer.plans SET status='ready',manifest_artifact_id=$2,manifest_digest=decode($3,'hex'),ready_at=ready.at,expires_at=ready.at+$4::bigint*interval '1 hour',revision=revision+1 FROM ready WHERE attempt_id=$1 AND status='assembling' AND state_epoch=$5 AND source_facts_revision=$6`, m.AttemptID, manifestID, p.ManifestDigest, ttl, epoch, a.Source.FactsRevision)
+	tag, e := tx.Exec(ctx, `WITH ready AS (SELECT clock_timestamp() AS at) UPDATE cosmoformer.plans SET status=CASE WHEN provenance='recovery' THEN 'recovery_only' ELSE 'ready' END,manifest_artifact_id=$2,manifest_digest=decode($3,'hex'),ready_at=ready.at,expires_at=ready.at+$4::bigint*interval '1 hour',revision=revision+1 FROM ready WHERE attempt_id=$1 AND status='assembling' AND state_epoch=$5 AND source_facts_revision=$6`, m.AttemptID, manifestID, p.ManifestDigest, ttl, epoch, a.Source.FactsRevision)
 	if e != nil {
 		return e
 	}

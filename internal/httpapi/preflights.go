@@ -54,7 +54,7 @@ func (a *Server) registerPreflights(api huma.API) {
 				}
 			}
 			scopes, _ := json.Marshal(visible)
-			rows, e := tx.Query(ctx, `SELECT o.id::text,o.run_id::text,s.display_name,r.source_commit,r.purpose,o.status,o.priority,coalesce(o.terminal_reason,''),o.revision,o.native_planning,s.project_id::text,s.environment_id::text,EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=o.id AND outcome='preparation_failed') AND NOT EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=o.id AND (ever_permitted OR closed_at IS NULL)) FROM cosmoformer.operations o JOIN cosmoformer.runs r ON r.id=o.run_id JOIN cosmoformer.stacks s ON s.id=o.stack_id WHERE o.kind='plan' AND EXISTS(SELECT FROM jsonb_array_elements($1::jsonb) AS scope(value) WHERE scope.value->>'project_id'=s.project_id::text AND (NOT o.native_planning OR scope.value->>'role'<>'administrator') AND (coalesce(scope.value->>'environment_id','')='' OR scope.value->>'environment_id'=s.environment_id::text)) ORDER BY o.created_at DESC,o.id LIMIT 100`, scopes)
+			rows, e := tx.Query(ctx, `SELECT o.id::text,o.run_id::text,s.display_name,r.source_commit,r.purpose,o.status,o.priority,coalesce(o.terminal_reason,''),o.revision,o.native_planning,s.project_id::text,s.environment_id::text,EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=o.id AND outcome='preparation_failed') AND NOT EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=o.id AND (ever_permitted OR closed_at IS NULL OR outcome NOT IN ('success','preparation_failed'))) FROM cosmoformer.operations o JOIN cosmoformer.runs r ON r.id=o.run_id JOIN cosmoformer.stacks s ON s.id=o.stack_id WHERE o.kind='plan' AND EXISTS(SELECT FROM jsonb_array_elements($1::jsonb) AS scope(value) WHERE scope.value->>'project_id'=s.project_id::text AND (NOT o.native_planning OR scope.value->>'role'<>'administrator') AND (coalesce(scope.value->>'environment_id','')='' OR scope.value->>'environment_id'=s.environment_id::text)) ORDER BY o.created_at DESC,o.id LIMIT 100`, scopes)
 			if e != nil {
 				return e
 			}
@@ -105,7 +105,7 @@ func (a *Server) registerPreflights(api huma.API) {
 	})
 	register(api, "POST", "/organizations/{org}/operations/{id}/retry", "retry-preflight", func(ctx context.Context, in *RevisionInput) (*OK, error) {
 		return mutate(a, ctx, in.Org, false, func(tx pgx.Tx, actor store.Actor) error { return authorize(ctx, tx, actor, in.ID, false) }, func(tx pgx.Tx, actor store.Actor) (*OK, error) {
-			tag, e := tx.Exec(ctx, `UPDATE cosmoformer.operations SET status='queued',terminal_reason=NULL,revision=revision+1 WHERE id=$1 AND revision=$2 AND status='failed' AND kind='plan' AND EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=$1 AND outcome='preparation_failed') AND NOT EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=$1 AND (ever_permitted OR closed_at IS NULL))`, in.ID, in.Body.Revision)
+			tag, e := tx.Exec(ctx, `UPDATE cosmoformer.operations SET status='queued',terminal_reason=NULL,revision=revision+1 WHERE id=$1 AND revision=$2 AND status='failed' AND kind='plan' AND EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=$1 AND outcome='preparation_failed') AND NOT EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=$1 AND (ever_permitted OR closed_at IS NULL OR outcome NOT IN ('success','preparation_failed')))`, in.ID, in.Body.Revision)
 			if e != nil {
 				return nil, e
 			}

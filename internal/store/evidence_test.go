@@ -285,6 +285,8 @@ func TestPreparationRetryRetainsFinalizedEvidence(t *testing.T) {
 func TestOrphanUploadCleanupWithoutFinalization(t *testing.T) {
 	db := testsupport.NewDatabase(t)
 	x := evidenceFixture(t, db)
+	// This cleanup fixture has no recovery use; open recovery now holds new uploads.
+	sqlOK(t, db.Owner, `UPDATE cosmoformer.recovery_cases SET status='cleared',cleared_at=clock_timestamp() WHERE id=$1`, x["recovery"])
 	c := db.Owner
 	var orphan string
 	if err := c.QueryRow(evidenceCtx, `INSERT INTO cosmoformer.artifacts(org_id,attempt_id,kind,upload_id,bucket,object_key,version_id,state) VALUES($1,$2,'binary_plan',gen_random_uuid(),'fictional','failed-upload','orphan-version','uploading') RETURNING id::text`, x["org"], x["attempt"]).Scan(&orphan); err != nil {

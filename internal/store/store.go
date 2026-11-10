@@ -15,7 +15,7 @@ import (
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
-const SchemaVersion int32 = 11
+const SchemaVersion int32 = 12
 
 var ErrForbidden = errors.New("insufficient permission")
 var ErrNotFound = errors.New("not found")
@@ -83,6 +83,12 @@ func (s *Store) Ready(ctx context.Context) error {
  AND EXISTS(SELECT FROM pg_attribute WHERE attrelid='cosmoformer.approvals'::regclass AND attname='manifest_digest' AND NOT attisdropped)
  AND EXISTS(SELECT FROM pg_attribute WHERE attrelid='cosmoformer.approvals'::regclass AND attname='source_commit' AND NOT attisdropped)`).Scan(&safe); e != nil || !safe {
 		return errors.New("database approvals have incompatible protections")
+	}
+	if e = s.Pool.QueryRow(ctx, `SELECT
+ (SELECT count(*)=7 FROM pg_trigger WHERE tgname IN ('recovery_approval_event_integrity','control_identity','recovery_identity','recovery_vote_integrity','recovery_hold_artifact','recovery_operation_identity','recovery_plan_identity') AND tgrelid IN ('cosmoformer.approvals'::regclass,'cosmoformer.control_requests'::regclass,'cosmoformer.recovery_cases'::regclass,'cosmoformer.recovery_votes'::regclass,'cosmoformer.artifacts'::regclass,'cosmoformer.operations'::regclass,'cosmoformer.plans'::regclass) AND tgenabled='O')
+ AND (SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid='cosmoformer.recovery_evidence_versions'::regclass)
+ AND NOT has_table_privilege(current_user,'cosmoformer.recovery_evidence_versions','UPDATE,DELETE')`).Scan(&safe); e != nil || !safe {
+		return errors.New("database recovery has incompatible protections")
 	}
 	return nil
 }

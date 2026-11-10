@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"os"
 	"os/exec"
 	"sync"
 	"syscall"
@@ -42,34 +43,65 @@ func runProgram(ctx context.Context, program, dir string, args, env []string) ([
 	cmd.Dir = dir
 	cmd.Env = env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	var output cappedOutput
-	cmd.Stdout = &output
-	cmd.Stderr = io.Discard
-	if e := cmd.Start(); e != nil {
+	stdout, wout, e := os.Pipe()
+	if e != nil {
 		return nil, source.ErrSource
 	}
-	pid := cmd.Process.Pid
+	defer stdout.Close()
+	stderr, werr, e := os.Pipe()
+	if e != nil {
+		wout.Close()
+		return nil, source.ErrSource
+	}
+	defer stderr.Close()
+	cmd.Stdout = wout
+	cmd.Stderr = werr
+	s := supervisor(ctx)
+	if e = s.start(0, cmd.Start, func(kind string) bool { return signalProgram(cmd, kind) }); e != nil {
+		wout.Close()
+		werr.Close()
+		return nil, source.ErrSource
+	}
+	wout.Close()
+	werr.Close()
+	var output cappedOutput
+	drained := make(chan struct{})
+	go func() {
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); io.Copy(&output, stdout) }()
+		go func() { defer wg.Done(); io.Copy(io.Discard, stderr) }()
+		wg.Wait()
+		close(drained)
+	}()
 	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	var e error
+	go func() {
+		e, empty := waitProgram(cmd, s)
+		if !empty {
+			e = source.ErrProcess
+		}
+		done <- e
+	}()
 	select {
 	case e = <-done:
 	case <-ctx.Done():
-		// The exact still-owned direct child receives one graceful interrupt. A
-		// deadline never escalates to SIGKILL or claims that a group was stopped.
+		s.interrupt()
 		select {
 		case e = <-done:
-		default:
-			cmd.Process.Signal(syscall.SIGINT)
-			select {
-			case e = <-done:
-			case <-time.After(2 * time.Second):
-				return nil, source.ErrProcess
-			}
+		case <-time.After(2 * time.Second):
+			return nil, source.ErrProcess
 		}
 	}
-	if syscall.Kill(-pid, 0) != syscall.ESRCH {
+	select {
+	case <-drained:
+	case <-time.After(2 * time.Second):
+		stdout.Close()
+		stderr.Close()
+		<-drained
 		return nil, source.ErrProcess
+	}
+	if e == source.ErrProcess {
+		return nil, e
 	}
 	if e != nil || output.overflow {
 		return nil, source.ErrSource

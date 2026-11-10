@@ -45,8 +45,10 @@ type SyncOutput struct {
 type PlanInput struct {
 	OrgIDPath
 	Body struct {
-		Intent string `json:"intent,omitempty" enum:"source_check,native_plan"`
-		Source struct {
+		RecoveryCase     string `json:"recovery_case_id,omitempty" format:"uuid"`
+		RecoveryRevision int64  `json:"expected_evidence_revision,omitempty" minimum:"1" maximum:"9007199254740991"`
+		Intent           string `json:"intent,omitempty" enum:"source_check,native_plan,recovery_plan"`
+		Source           struct {
 			Kind string `json:"kind" enum:"branch,pr"`
 			PR   int    `json:"pr_number,omitempty" minimum:"1"`
 		} `json:"source"`
@@ -279,7 +281,7 @@ func (a *Server) registerSourceActions(api huma.API) {
 			if e = a.Coordinator.RequireObservation(ctx, tx, observation, factsRevision); e != nil {
 				return nil, e
 			}
-			if in.Body.Intent == "native_plan" {
+			if in.Body.Intent != "source_check" && in.Body.Intent != "" {
 				var compatible bool
 				if e := tx.QueryRow(ctx, `SELECT assessment='compatible' FROM cosmoformer.stacks WHERE id=$1`, in.ID).Scan(&compatible); e != nil {
 					return nil, e
@@ -292,7 +294,7 @@ func (a *Server) registerSourceActions(api huma.API) {
 			if e != nil {
 				return nil, e
 			}
-			if in.Body.Intent == "native_plan" {
+			if in.Body.Intent != "source_check" && in.Body.Intent != "" {
 				if a.Evidence == nil {
 					return nil, problem(ctx, 503, "Protected planning evidence storage is unavailable.")
 				}
@@ -308,8 +310,33 @@ func (a *Server) registerSourceActions(api huma.API) {
 				}
 			}
 			spec := coordinator.Spec(eff, rev, repo, r.URL, facts.Commit, observation.SubjectID, factsRevision)
+			var recoveryID any
+			var recoveryRevision any
+			if in.Body.Intent == "recovery_plan" {
+				rc, e := recoveryFor(ctx, tx, actor, in.Body.RecoveryCase, access.Plan)
+				if e != nil {
+					return nil, e
+				}
+				if rc.Stack != in.ID || !rc.CanPlan || rc.EvidenceRevision != in.Body.RecoveryRevision {
+					return nil, store.ErrConflict
+				}
+				spec.Recovery = &runs.Provenance{Kind: "recovery", Case: rc.ID, Revision: rc.EvidenceRevision}
+				recoveryID = rc.ID
+				recoveryRevision = rc.EvidenceRevision
+			} else {
+				if in.Body.RecoveryCase != "" || in.Body.RecoveryRevision != 0 {
+					return nil, store.ErrConflict
+				}
+				var held bool
+				if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM cosmoformer.recovery_cases WHERE stack_id=$1 AND status='open')`, in.ID).Scan(&held); e != nil {
+					return nil, e
+				}
+				if held && in.Body.Intent == "native_plan" {
+					return nil, approvalProblem(ctx, "RECOVERY_REQUIRED")
+				}
+			}
 			// Coalesce only older unclaimed source work; never overwrite active attempts.
-			if _, e = tx.Exec(ctx, `UPDATE cosmoformer.operations SET status='superseded',revision=revision+1 WHERE stack_id=$1 AND kind='plan' AND status='queued' AND native_planning=$3 AND NOT EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=cosmoformer.operations.id AND closed_at IS NULL) AND run_id IN(SELECT id FROM cosmoformer.runs WHERE source_subject_id=$2)`, in.ID, observation.SubjectID, in.Body.Intent == "native_plan"); e != nil {
+			if _, e = tx.Exec(ctx, `UPDATE cosmoformer.operations SET status='superseded',revision=revision+1 WHERE stack_id=$1 AND kind='plan' AND status='queued' AND native_planning=$3 AND NOT EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=cosmoformer.operations.id AND closed_at IS NULL) AND recovery_case_id IS NOT DISTINCT FROM $4::uuid AND run_id IN(SELECT id FROM cosmoformer.runs WHERE source_subject_id=$2)`, in.ID, observation.SubjectID, in.Body.Intent != "source_check" && in.Body.Intent != "", recoveryID); e != nil {
 				return nil, e
 			}
 			if _, e = tx.Exec(ctx, `UPDATE cosmoformer.work_items SET status='retired' WHERE status='queued' AND operation_id IN(SELECT id FROM cosmoformer.operations WHERE stack_id=$1 AND status='superseded')`, in.ID); e != nil {
@@ -320,10 +347,13 @@ func (a *Server) registerSourceActions(api huma.API) {
 			if in.Body.Source.Kind == "pr" {
 				purpose = "pr_preview"
 			}
+			if in.Body.Intent == "recovery_plan" {
+				purpose = "recovery"
+			}
 			if _, e = tx.Exec(ctx, `INSERT INTO cosmoformer.runs(id,org_id,stack_id,source_subject_id,source_facts_revision,source_commit,purpose,requester_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, run, in.Org, in.ID, observation.SubjectID, factsRevision, facts.Commit, purpose, actor.ID); e != nil {
 				return nil, e
 			}
-			if _, e = tx.Exec(ctx, `INSERT INTO cosmoformer.operations(id,org_id,run_id,stack_id,kind,status,priority,accepted_at,ordering_at,requester_id,native_planning) VALUES($1,$2,$3,$4,'plan','queued',$5,clock_timestamp(),clock_timestamp(),$6,$7)`, op, in.Org, run, in.ID, in.Body.Priority, actor.ID, in.Body.Intent == "native_plan"); e != nil {
+			if _, e = tx.Exec(ctx, `INSERT INTO cosmoformer.operations(id,org_id,run_id,stack_id,kind,status,priority,accepted_at,ordering_at,requester_id,native_planning,recovery_case_id,recovery_evidence_revision) VALUES($1,$2,$3,$4,'plan','queued',$5,clock_timestamp(),clock_timestamp(),$6,$7,$8,$9)`, op, in.Org, run, in.ID, in.Body.Priority, actor.ID, in.Body.Intent != "source_check" && in.Body.Intent != "", recoveryID, recoveryRevision); e != nil {
 				return nil, e
 			}
 			if _, e = tx.Exec(ctx, `INSERT INTO cosmoformer.work_items(org_id,operation_id,phase,status,assignment_spec) VALUES($1,$2,'preflight','queued',$3)`, in.Org, op, jsonBytes(spec)); e != nil {
@@ -336,7 +366,7 @@ func (a *Server) registerSourceActions(api huma.API) {
 			out.Body.Status = "queued"
 			out.Body.OperationID = op
 			action := "preflight.request"
-			if in.Body.Intent == "native_plan" {
+			if in.Body.Intent != "source_check" && in.Body.Intent != "" {
 				action = "plan.request"
 			}
 			return out, store.Audit(ctx, tx, in.Org, actor.ID, action, run)

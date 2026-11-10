@@ -90,6 +90,20 @@ func TestVersionEightDefinerUpgrade(t *testing.T) {
 	db, c, fingerprint := quotaConnection(t)
 	// Restore the exact version-8 function setting without rewriting migrations.
 	sqlOK(t, db.Owner, `
+ DROP FUNCTION cosmoformer.recovery_approval_event_integrity() CASCADE;
+ DROP FUNCTION cosmoformer.control_identity() CASCADE;
+ DROP FUNCTION cosmoformer.recovery_identity() CASCADE;
+ DROP FUNCTION cosmoformer.recovery_vote_integrity() CASCADE;
+ DROP FUNCTION cosmoformer.recovery_hold_artifact() CASCADE;
+ DROP FUNCTION cosmoformer.recovery_operation_identity() CASCADE;
+ DROP FUNCTION cosmoformer.recovery_plan_identity() CASCADE;
+ DROP TABLE cosmoformer.recovery_evidence_versions;
+ ALTER TABLE cosmoformer.attempts DROP COLUMN stop_conflicted;
+ ALTER TABLE cosmoformer.control_requests DROP COLUMN worker_id,DROP COLUMN generation,DROP COLUMN agent_instance,DROP COLUMN signal_sent,DROP COLUMN delivered_at,DROP COLUMN observed_at;
+ ALTER TABLE cosmoformer.operations DROP COLUMN recovery_case_id,DROP COLUMN recovery_evidence_revision;
+ ALTER TABLE cosmoformer.plans DROP COLUMN recovery_evidence_revision;
+ ALTER TABLE cosmoformer.recovery_cases DROP CONSTRAINT recovery_cases_org_id_id_stack_id_target_id_key;
+ DROP INDEX cosmoformer.recovery_origin_event;
  DROP FUNCTION cosmoformer.approval_policy_revision() CASCADE;
  ALTER TABLE cosmoformer.projects DROP COLUMN approval_policy_revision;
  DROP FUNCTION cosmoformer.approval_event_integrity() CASCADE;

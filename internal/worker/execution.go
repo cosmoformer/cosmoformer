@@ -126,3 +126,15 @@ func (p *LaunchPermission) Spawn(id runs.Identity, attempt, digest string, ticks
 	p.state = "spawn_claimed"
 	return start()
 }
+
+// DiscardCancelled shares the permission's launch lock. A failed/claimed spawn
+// cannot manufacture never-started proof.
+func (p *LaunchPermission) DiscardCancelled(id runs.Identity, attempt string) (runs.CommandEvent, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.identity != id || p.attempt != attempt || p.state != "not_spawned" {
+		return runs.CommandEvent{}, ErrAgent
+	}
+	p.state = "discarded"
+	return runs.CommandEvent{Ordinal: p.permission.Ordinal, Permission: p.permission.ID, Event: "not_executed", ProofReason: "local_cancel_discarded"}, nil
+}
