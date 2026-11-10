@@ -387,7 +387,7 @@ func TestResultStopsOnUnreadableOrIncompletePermissionLedger(t *testing.T) {
 				want = "STOP_EVIDENCE_REQUIRED"
 			}
 			result := runs.ExecutionResult{Outcome: "failure", Commands: []runs.CommandResult{}, Artifacts: []string{}}
-			conflict, e := policyCoordinator().executionResult(context.Background(), tx, runs.Assignment{}, runs.Message{}, result, "", "", true, &runs.Transition{})
+			conflict, e := policyCoordinator().executionResult(context.Background(), tx, runs.Assignment{}, runs.Message{}, result, "", "", true, nil, &runs.Transition{})
 			codeIs(t, e, want)
 			if conflict || tx.writes != 0 {
 				t.Fatal("unreadable permission ledger permitted finalization")

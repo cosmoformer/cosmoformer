@@ -115,6 +115,8 @@ type Poll struct {
 	Wait      int    `json:"wait_seconds"`
 }
 type Assignment struct {
+	StateEpoch      int64          `json:"state_epoch,omitempty"`
+	ApprovalFloor   int            `json:"approval_floor,omitempty"`
 	AttemptID       string         `json:"attempt_id"`
 	OperationID     string         `json:"operation_id"`
 	WorkItemID      string         `json:"work_item_id"`

@@ -1,6 +1,5 @@
-// Package worker runs source preflight and supplies protected input/permission
-// primitives. AWS session preparation is explicit and disconnected from dispatch;
-// native dispatch remains unimplemented.
+// Package worker runs contained source preflight and explicitly authorized
+// native planning with protected inputs, evidence and truthful process facts.
 package worker
 
 import (
@@ -93,6 +92,9 @@ type Agent struct {
 	Admission                 runs.Admission
 	Identity                  runs.Identity
 	Clock                     clock.Source
+	ExpectedBootstrap         string
+	Native                    NativeIO
+	Access                    AccessFactory
 	Git                       source.Git
 	mu                        sync.Mutex
 	terms                     []string
@@ -138,7 +140,7 @@ func (a *Agent) call(ctx context.Context, path string, in, out any) error {
 				break
 			}
 		}
-		return fmt.Errorf("worker request rejected (%d, %s)", resp.StatusCode, code)
+		return &Rejected{Status: resp.StatusCode, Code: code, Route: path}
 	}
 	// Huma adds its schema-link annotation to HTTP response objects. It is not
 	// worker protocol data; all remaining response fields stay closed.
@@ -226,42 +228,87 @@ func (a *Agent) RunOne(ctx context.Context) error {
 	if e != nil || now >= deadline || assignment.NextSeq != 1 {
 		return ErrAgent
 	}
-	if assignment.Phase != "preflight" || assignment.Spec.Phase != "preflight" || assignment.Spec.Version != 1 || assignment.Spec.Engine.ID != a.Admission.RuntimeID {
+	if (assignment.Phase != "preflight" && assignment.Phase != "execution") || assignment.Spec.Phase != "preflight" || assignment.Spec.Version != 1 || assignment.Spec.Engine.ID != a.Admission.RuntimeID {
 		return ErrAgent
 	}
 	b, _ := catalog.Canonical(assignment.Spec)
+	if assignment.Phase == "execution" {
+		if assignment.Execution == nil || assignment.Execution.Validate() != nil || assignment.Kind != "plan" {
+			return ErrAgent
+		}
+		b, _ = catalog.Canonical(assignment.Execution)
+	}
 	if hash(b) != assignment.Digest {
 		return ErrAgent
 	}
 	seq := int64(1)
+	var last runs.Transition
+	var pending *runs.Message
+	var pendingRoute string
+	ambiguous := false
 	send := func(route string, payload any) error {
-		raw, _ := json.Marshal(payload)
-		m := runs.Message{Protocol: 1, MessageID: runs.ID(), Identity: a.Identity, AttemptID: assignment.AttemptID, Seq: seq, Payload: raw}
-		var response runs.Transition
-		// Retransmit exactly the same message after an ambiguous response. A new
-		// process cannot repeat RunOne over an unresolved assignment.
-		e := a.call(ctx, "/attempts/"+assignment.AttemptID+"/"+route, m, &response)
-		if e != nil && ctx.Err() == nil {
-			e = a.call(ctx, "/attempts/"+assignment.AttemptID+"/"+route, m, &response)
+		raw, marshalErr := json.Marshal(payload)
+		if marshalErr != nil {
+			return ErrAgent
 		}
-		if e != nil {
-			return e
+		if pending != nil {
+			if pendingRoute != route || !bytes.Equal(pending.Payload, raw) {
+				return ErrAgent
+			}
+		} else {
+			pending = &runs.Message{Protocol: 1, MessageID: runs.ID(), Identity: a.Identity, AttemptID: assignment.AttemptID, Seq: seq, Payload: raw}
+			pendingRoute = route
+			ambiguous = false
+		}
+		var response runs.Transition
+		var err error
+		for retry := 0; retry < 2; retry++ {
+			err = a.call(ctx, "/attempts/"+assignment.AttemptID+"/"+route, *pending, &response)
+			if err == nil {
+				break
+			}
+			var rejected *Rejected
+			if !errors.As(err, &rejected) || rejected.Status >= 500 {
+				ambiguous = true
+			}
+			if ctx.Err() != nil {
+				break
+			}
+		}
+		if err != nil {
+			// A later rejection cannot disprove an earlier ambiguous commit.
+			if !ambiguous {
+				pending = nil
+				pendingRoute = ""
+			}
+			return err
 		}
 		if !response.Accepted || response.NextSeq != seq+1 {
+			ambiguous = true
 			return ErrAgent
 		}
 		seq++
+		last = response
+		pending = nil
+		pendingRoute = ""
+		ambiguous = false
 		return nil
+	}
+	preparationFailed := func(reason string) error {
+		if assignment.Phase == "execution" {
+			return send("result", runs.ExecutionResult{Outcome: "preparation_failed", Commands: []runs.CommandResult{}, Artifacts: []string{}, NoStateChild: true, Reaped: true})
+		}
+		return send("result", runs.Result{Outcome: "preparation_failed", Reason: reason, NoStateChild: true, Reaped: true})
 	}
 	if e = send("ack", map[string]string{"work_item_id": assignment.WorkItemID}); e != nil {
 		return e
 	}
 	if e = os.MkdirAll(a.AttemptDir, 0700); e != nil {
-		return send("result", runs.Result{Outcome: "preparation_failed", Reason: "ATTEMPT_DIRECTORY_UNAVAILABLE", NoStateChild: true, Reaped: true})
+		return preparationFailed("ATTEMPT_DIRECTORY_UNAVAILABLE")
 	}
 	dir, e := os.MkdirTemp(a.AttemptDir, "attempt-")
 	if e != nil {
-		return send("result", runs.Result{Outcome: "preparation_failed", Reason: "ATTEMPT_DIRECTORY_UNAVAILABLE", NoStateChild: true, Reaped: true})
+		return preparationFailed("ATTEMPT_DIRECTORY_UNAVAILABLE")
 	}
 	stopped := true
 	defer func() {
@@ -277,7 +324,7 @@ func (a *Agent) RunOne(ctx context.Context) error {
 	repositories := map[string]string{assignment.Source.URL: assignment.Source.RepositoryID}
 	credentialContext, stopHelper, e := a.serveCredentials(ctx, dir, *assignment, repositories)
 	if e != nil {
-		return send("result", runs.Result{Outcome: "preparation_failed", Reason: "CREDENTIAL_HELPER_UNAVAILABLE", NoStateChild: true, Reaped: true})
+		return preparationFailed("CREDENTIAL_HELPER_UNAVAILABLE")
 	}
 	defer stopHelper()
 	// Elapsed cap cancels preparation gracefully. It never forces a process kill
@@ -305,6 +352,7 @@ func (a *Agent) RunOne(ctx context.Context) error {
 		}
 	}()
 	tree := filepath.Join(dir, "source")
+	trees := map[string]checkoutTree{assignment.Source.URL + "@" + assignment.Source.Commit: {ID: assignment.Source.RepositoryID, Commit: assignment.Source.Commit, Dir: tree, URL: assignment.Source.URL}}
 	e = a.Git.Checkout(attemptCtx, tree, assignment.Source.URL, assignment.Source.Commit, credentialContext)
 	stage := "SOURCE_CHECKOUT_FAILED"
 	var inspected source.Inspection
@@ -335,7 +383,7 @@ func (a *Agent) RunOne(ctx context.Context) error {
 				}
 				if e == nil {
 					stage = "SOURCE_INSPECTION_FAILED"
-					cache := map[string]string{}
+					cache := map[string]string{assignment.Source.URL + "@" + assignment.Source.Commit: tree}
 					resolver := func(m source.ModuleSource) (string, error) {
 						key := m.Repository + "@" + m.Commit
 						if p, ok := cache[key]; ok {
@@ -379,6 +427,7 @@ func (a *Agent) RunOne(ctx context.Context) error {
 							return "", err
 						}
 						cache[key] = p
+						trees[key] = checkoutTree{ID: approvedID, Commit: m.Commit, Dir: p, URL: m.Repository}
 						return p, nil
 					}
 					tables := []string{""}
@@ -402,7 +451,7 @@ func (a *Agent) RunOne(ctx context.Context) error {
 			stopped = false
 			return ErrAgent
 		}
-		return send("result", runs.Result{Outcome: "preparation_failed", Reason: stage, NoStateChild: true, Reaped: true})
+		return preparationFailed(stage)
 	}
 	safe, _ := json.Marshal(inspected)
 	a.mu.Lock()
@@ -414,9 +463,18 @@ func (a *Agent) RunOne(ctx context.Context) error {
 	}
 	a.mu.Unlock()
 	if leak {
-		return send("result", runs.Result{Outcome: "preparation_failed", Reason: stage, NoStateChild: true, Reaped: true})
+		return preparationFailed(stage)
+	}
+	if assignment.Phase == "execution" {
+		var nativeErr error
+		stopped, nativeErr = a.planNative(ctx, attemptCtx, *assignment, anchor, deadline, dir, tree, credentialContext, inspected, trees, send, &last)
+		return nativeErr
 	}
 	if e = send("prepare-result", runs.Prepare{Phase: "preflight", Result: "success", Digest: inspected.Digest, Backend: inspected.Backend, Modules: inspected.Modules, NoStateChild: true, Reaped: true}); e != nil {
+		var rejected *Rejected
+		if errors.As(e, &rejected) && rejected.Status >= 400 && rejected.Status < 500 {
+			return preparationFailed(stage)
+		}
 		return e
 	}
 	return send("result", runs.Result{Outcome: "success", Digest: inspected.Digest, NoStateChild: true, Reaped: true})
@@ -623,4 +681,15 @@ func CredentialHelper(operation, contextFile string, in io.Reader, out io.Writer
 	}
 	_, e = io.WriteString(out, "username="+response.Username+"\npassword="+response.Token+"\n\n")
 	return e
+}
+
+// Rejected identifies an authoritative HTTP rejection, separately from a lost
+// response. It contains no server body, input values or decoder diagnostics.
+type Rejected struct {
+	Status      int
+	Code, Route string
+}
+
+func (e *Rejected) Error() string {
+	return fmt.Sprintf("worker request rejected (%d, %s, %s)", e.Status, e.Code, e.Route)
 }

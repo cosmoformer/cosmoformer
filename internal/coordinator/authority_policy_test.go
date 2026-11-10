@@ -25,7 +25,7 @@ func authorityFixture(t *testing.T) (runs.Assignment, []policyRow) {
 	}
 	// Storage response shapes include the ordinary preflight authority, exact
 	// execution metadata, current automation scope, credentials and binding.
-	rows := []policyRow{row("", project, env, repo, true), row(true), row(true), row(true), row(int64(1), s.Source.Commit)}
+	rows := []policyRow{row(true), row("", project, env, repo, true), row(true), row(true), row(true), row(int64(1), s.Source.Commit)}
 	for range s.Grants {
 		rows = append(rows, row(true))
 	}

@@ -26,7 +26,7 @@ func (a *Server) registerExecutionInputs(api huma.API) {
 	workerRegister(api, "/attempts/{id}/execution-inputs", "worker-execution-inputs", func(ctx context.Context, in *ExecutionInputsInput) (*ExecutionInputsOutput, error) {
 		out := &ExecutionInputsOutput{Body: runs.ExecutionInputValues{SpecDigest: in.Body.SpecDigest, Secrets: []runs.EnvSecret{}}}
 		e := a.Coordinator.ExecutionInputs(ctx, bearer(in.Authorization), in.ID, in.Body, func(tx pgx.Tx, w coordinator.Worker, s runs.ExecutionSpec) error {
-			if a.Cipher == nil {
+			if a.Cipher == nil && len(s.Secrets) > 0 {
 				return store.ErrForbidden
 			}
 			total := 0
@@ -102,4 +102,32 @@ func (a *Server) workerSourceObservation(ctx context.Context, org, subject strin
 	// Return authoritative ineligible facts too. Acceptance must advance the
 	// source revision before the immutable assignment's eligibility is checked.
 	return f, nil
+}
+
+func (a *Server) currentExecutionSecrets(ctx context.Context, tx pgx.Tx, org string, s runs.ExecutionSpec) ([]runs.EnvSecret, error) {
+	if org == "" {
+		if e := tx.QueryRow(ctx, `SELECT current_setting('app.org_id')`).Scan(&org); e != nil {
+			return nil, e
+		}
+	}
+	out := []runs.EnvSecret{}
+	if len(s.Secrets) > 0 && a.Cipher == nil {
+		return nil, store.ErrForbidden
+	}
+	for _, r := range s.Secrets {
+		var encrypted []byte
+		if e := tx.QueryRow(ctx, `SELECT encrypted_value FROM cosmoformer.secrets WHERE id=$1 AND semantic_revision=$2 AND enabled`, r.ID, r.Revision).Scan(&encrypted); e != nil {
+			return nil, runs.Fail("INPUTS_CHANGED")
+		}
+		plain, e := a.Cipher.Open(encrypted, cryptostore.AAD(org, r.ID, "managed_secret", uint64(r.Revision)))
+		if e != nil {
+			return nil, store.ErrForbidden
+		}
+		value := string(plain)
+		if len(value) == 0 || len(value) > 16384 || !utf8.ValidString(value) || strings.ContainsRune(value, 0) {
+			return nil, runs.Fail("SECRET_VALUE_UNSUPPORTED")
+		}
+		out = append(out, runs.EnvSecret{ExpectedSecret: runs.ExpectedSecret{ID: r.ID, Revision: r.Revision, Destination: r.Destination}, Value: value})
+	}
+	return out, nil
 }

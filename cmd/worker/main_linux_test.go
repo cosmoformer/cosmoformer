@@ -50,6 +50,11 @@ func TestWorkerStartupRequiresProtectedIdentityAndApprovedRuntime(t *testing.T) 
 	t.Setenv("COSMOFORMER_IMAGE_DIGEST", "sha256:"+strings.Repeat("a", 64))
 	t.Setenv("COSMOFORMER_ATTEMPT_DIR", t.TempDir())
 	t.Setenv("COSMOFORMER_PLATFORM_ORIGIN", "https://platform.example.invalid")
+	t.Setenv("COSMOFORMER_EXPECTED_BOOTSTRAP_PRINCIPAL", "")
+	if e := run(); e == nil || !strings.Contains(e.Error(), "EXPECTED_BOOTSTRAP_PRINCIPAL") {
+		t.Fatal("bootstrap identity prerequisite missing", e)
+	}
+	t.Setenv("COSMOFORMER_EXPECTED_BOOTSTRAP_PRINCIPAL", "arn:aws:iam::111122223333:role/synthetic-bootstrap")
 	previous := http.DefaultTransport
 	t.Cleanup(func() { http.DefaultTransport = previous })
 	calls := 0

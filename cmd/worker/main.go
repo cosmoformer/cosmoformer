@@ -64,6 +64,11 @@ func run() error {
 	if e != nil {
 		return e
 	}
-	a := worker.Agent{HTTP: &http.Client{}, Origin: os.Getenv("COSMOFORMER_PLATFORM_ORIGIN"), Token: credential.Token, AttemptDir: dir, Clock: ticks, Git: source.Git{Run: worker.RunGit, Helper: executable}, Admission: runs.Admission{Protocol: 1, WorkerID: credential.WorkerID, Agent: runs.ID(), RuntimeID: runtimeID, Engine: m.Engine, Version: m.Version, Arch: m.Arch, ImageDigest: image, GitPackage: m.GitPackage, GitVersion: m.GitVersion, Phases: []string{"preflight"}, ClockSource: "boottime", ClockOK: true}}
+	expectedBootstrap := os.Getenv("COSMOFORMER_EXPECTED_BOOTSTRAP_PRINCIPAL")
+	if expectedBootstrap == "" {
+		return errors.New("COSMOFORMER_EXPECTED_BOOTSTRAP_PRINCIPAL is required")
+	}
+	syscall.Umask(0077)
+	a := worker.Agent{HTTP: &http.Client{}, Origin: os.Getenv("COSMOFORMER_PLATFORM_ORIGIN"), Token: credential.Token, AttemptDir: dir, Clock: ticks, ExpectedBootstrap: expectedBootstrap, Git: source.Git{Run: worker.RunGit, Helper: executable}, Admission: runs.Admission{Protocol: 1, WorkerID: credential.WorkerID, Agent: runs.ID(), RuntimeID: runtimeID, Engine: m.Engine, Version: m.Version, Arch: m.Arch, ImageDigest: image, GitPackage: m.GitPackage, GitVersion: m.GitVersion, Phases: []string{"preflight", "execution"}, ClockSource: "boottime", ClockOK: true}}
 	return a.Run(ctx)
 }

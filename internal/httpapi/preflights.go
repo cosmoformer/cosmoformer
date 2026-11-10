@@ -11,17 +11,18 @@ import (
 )
 
 type PreflightPublic struct {
-	ID            string `json:"id"`
-	RunID         string `json:"run_id"`
-	Stack         string `json:"stack"`
-	Commit        string `json:"commit"`
-	Purpose       string `json:"purpose"`
-	Status        string `json:"status"`
-	Priority      string `json:"priority"`
-	Reason        string `json:"reason"`
-	Revision      int64  `json:"revision"`
-	CanRetry      bool   `json:"can_retry"`
-	CanPrioritize bool   `json:"can_prioritize"`
+	NativePlanning bool   `json:"native_planning"`
+	ID             string `json:"id"`
+	RunID          string `json:"run_id"`
+	Stack          string `json:"stack"`
+	Commit         string `json:"commit"`
+	Purpose        string `json:"purpose"`
+	Status         string `json:"status"`
+	Priority       string `json:"priority"`
+	Reason         string `json:"reason"`
+	Revision       int64  `json:"revision"`
+	CanRetry       bool   `json:"can_retry"`
+	CanPrioritize  bool   `json:"can_prioritize"`
 }
 type PreflightsOutput struct {
 	Body struct {
@@ -53,7 +54,7 @@ func (a *Server) registerPreflights(api huma.API) {
 				}
 			}
 			scopes, _ := json.Marshal(visible)
-			rows, e := tx.Query(ctx, `SELECT o.id::text,o.run_id::text,s.display_name,r.source_commit,r.purpose,o.status,o.priority,coalesce(o.terminal_reason,''),o.revision,s.project_id::text,s.environment_id::text,EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=o.id AND outcome='preparation_failed') AND NOT EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=o.id AND (ever_permitted OR closed_at IS NULL)) FROM cosmoformer.operations o JOIN cosmoformer.runs r ON r.id=o.run_id JOIN cosmoformer.stacks s ON s.id=o.stack_id WHERE o.kind='plan' AND EXISTS(SELECT FROM jsonb_array_elements($1::jsonb) AS scope(value) WHERE scope.value->>'project_id'=s.project_id::text AND (coalesce(scope.value->>'environment_id','')='' OR scope.value->>'environment_id'=s.environment_id::text)) ORDER BY o.created_at DESC,o.id LIMIT 100`, scopes)
+			rows, e := tx.Query(ctx, `SELECT o.id::text,o.run_id::text,s.display_name,r.source_commit,r.purpose,o.status,o.priority,coalesce(o.terminal_reason,''),o.revision,o.native_planning,s.project_id::text,s.environment_id::text,EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=o.id AND outcome='preparation_failed') AND NOT EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=o.id AND (ever_permitted OR closed_at IS NULL)) FROM cosmoformer.operations o JOIN cosmoformer.runs r ON r.id=o.run_id JOIN cosmoformer.stacks s ON s.id=o.stack_id WHERE o.kind='plan' AND EXISTS(SELECT FROM jsonb_array_elements($1::jsonb) AS scope(value) WHERE scope.value->>'project_id'=s.project_id::text AND (coalesce(scope.value->>'environment_id','')='' OR scope.value->>'environment_id'=s.environment_id::text)) ORDER BY o.created_at DESC,o.id LIMIT 100`, scopes)
 			if e != nil {
 				return e
 			}
@@ -62,7 +63,7 @@ func (a *Server) registerPreflights(api huma.API) {
 				var p PreflightPublic
 				var project, env string
 				var retry bool
-				if e = rows.Scan(&p.ID, &p.RunID, &p.Stack, &p.Commit, &p.Purpose, &p.Status, &p.Priority, &p.Reason, &p.Revision, &project, &env, &retry); e != nil {
+				if e = rows.Scan(&p.ID, &p.RunID, &p.Stack, &p.Commit, &p.Purpose, &p.Status, &p.Priority, &p.Reason, &p.Revision, &p.NativePlanning, &project, &env, &retry); e != nil {
 					return e
 				}
 				if !access.Allows(g, project, env, access.View) && !access.Allows(g, project, env, access.Manage) {

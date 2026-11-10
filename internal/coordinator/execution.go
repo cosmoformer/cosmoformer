@@ -21,9 +21,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// NativeEvidenceVerifier is the native profile boundary. The future planning
-// pipeline must validate exact schema compatibility; production has no adapter
-// yet. Tests inject validation of synthetic schema bytes, never an executor.
+// NativeEvidenceVerifier is the exact native schema/profile boundary. The
+// planning pipeline installs the verified profile; protocol tests inject I/O.
 type NativeEvidenceVerifier interface {
 	VerifySchema(context.Context, runs.ExecutionSpec, runs.Manifest, []byte) error
 }
@@ -35,11 +34,19 @@ func (c *Coordinator) executionAuthority(ctx context.Context, tx pgx.Tx, a runs.
 		return runs.Fail("INVALID_SPEC")
 	}
 	s := *a.Execution
+
 	if a.Kind != "plan" {
 		return runs.Fail("APPLY_PREREQUISITES_UNAVAILABLE")
 	}
 	if kms, _ := s.Backend.Attributes["kms_key_id"].(string); kms != "" {
 		return runs.Fail("KMS_GRANT_PREREQUISITES_UNAVAILABLE")
+	}
+	var compatible bool
+	if e := tx.QueryRow(ctx, `SELECT assessment='compatible' FROM cosmoformer.stacks WHERE id=$1`, a.StackID).Scan(&compatible); e != nil {
+		return e
+	}
+	if !compatible {
+		return runs.Fail("COMPANY_FIT_NOT_COMPATIBLE")
 	}
 	if e := c.authority(ctx, tx, a.OperationID, s.Preflight()); e != nil {
 		return e
@@ -129,7 +136,7 @@ func (c *Coordinator) executionAuthority(ctx context.Context, tx pgx.Tx, a runs.
 	}
 	// Read-only boolean check; authority revalidation must not add permanent
 	// backend claims or reveal installation-wide target records.
-	if e = tx.QueryRow(ctx, `SELECT cosmoformer.execution_binding_matches($1,$2,$3,$4,$5,$6)`, a.AttemptID, s.Backend.Target.Partition, s.Backend.Target.Bucket, s.Backend.Target.Key, s.Backend.Profile, nullable(s.Backend.TableARN)).Scan(&valid); e != nil {
+	if e = tx.QueryRow(ctx, `SELECT cosmoformer.execution_binding_matches($1,$2,$3,$4,$5,$6) AND EXISTS(SELECT FROM cosmoformer.plans WHERE attempt_id=$1 AND status='assembling' AND state_epoch=cosmoformer.execution_target_epoch($1) AND profile_id=$7 AND rule_version=$8)`, a.AttemptID, s.Backend.Target.Partition, s.Backend.Target.Bucket, s.Backend.Target.Key, s.Backend.Profile, nullable(s.Backend.TableARN), s.ProfileID, s.RuleVersion).Scan(&valid); e != nil {
 		return e
 	}
 	if !valid {
@@ -175,6 +182,7 @@ type executionEvidence struct {
 	Manifest *runs.Manifest
 	Lock     []byte
 	Records  []evidence.Artifact
+	Planning *planningEvidence
 }
 
 func (c *Coordinator) readExecutionArtifact(ctx context.Context, token string, m runs.Message, id, kind string) (evidence.Artifact, []byte, error) {
@@ -232,6 +240,18 @@ func (c *Coordinator) executionEvidence(ctx context.Context, token, route string
 		return nil
 	}
 	switch route {
+	case "result":
+		var p runs.ExecutionResult
+		if e := runs.Decode(m.Payload, &p); e != nil {
+			return out, e
+		}
+		if p.Outcome == "success" {
+			var e error
+			out.Planning, e = c.readPlanningEvidence(ctx, token, m, p)
+			if e != nil {
+				return out, e
+			}
+		}
 	case "prepare-result":
 		var p runs.ExecutionPrepare
 		if e := runs.Decode(m.Payload, &p); e != nil {
@@ -359,10 +379,10 @@ func (c *Coordinator) executionReplay(ctx context.Context, token, route string, 
 				if e = c.current(ctx, tx, w, m.Identity, true); e != nil {
 					return e
 				}
-				if e = c.executionAuthority(ctx, tx, *a); e != nil {
+				if e = c.canLaunch(ctx, tx, m.AttemptID, a.OperationID); e != nil {
 					return e
 				}
-				if e = c.canLaunch(ctx, tx, m.AttemptID, a.OperationID); e != nil {
+				if e = c.executionAuthority(ctx, tx, *a); e != nil {
 					return e
 				}
 				return c.permissionRemaining(ctx, tx, m.AttemptID, out.Permission)
@@ -422,6 +442,10 @@ func (c *Coordinator) attention(ctx context.Context, tx pgx.Tx, attempt string) 
 	// Contradictory late terminal facts preserve history but also open the
 	// target hold. A released old attempt must not silently authorize new work.
 	_, e := tx.Exec(ctx, `SELECT cosmoformer.execution_attention($1)`, attempt)
+	if e != nil {
+		return e
+	}
+	_, e = tx.Exec(ctx, `INSERT INTO cosmoformer.artifact_holds(org_id,artifact_id,owner_kind,owner_id,reason) SELECT a.org_id,a.id,'recovery',r.id,'execution_uncertain' FROM cosmoformer.artifacts a JOIN cosmoformer.recovery_cases r ON r.origin_attempt_id=$1 AND r.status='open' WHERE a.attempt_id=$1 AND a.state IN ('uploading','finalized') AND NOT EXISTS(SELECT FROM cosmoformer.cleanup_claims WHERE artifact_id=a.id) ON CONFLICT DO NOTHING`, attempt)
 	return e
 }
 func (c *Coordinator) canLaunch(ctx context.Context, tx pgx.Tx, attempt, op string) error {
@@ -502,7 +526,7 @@ func (c *Coordinator) executionTransition(ctx context.Context, token, route stri
 	}
 	var observation *Observation
 	var facts bitbucket.Facts
-	if route == "start-permission" {
+	if route == "start-permission" || route == "result" && payload.(*runs.ExecutionResult).Outcome == "success" {
 		// Persist clock failure independently of a rejected command transaction.
 		good := false
 		e = c.workerTx(ctx, token, func(tx pgx.Tx, w Worker) error {
@@ -521,8 +545,11 @@ func (c *Coordinator) executionTransition(ctx context.Context, token, route stri
 		if !good {
 			return nil, runs.Fail("CLOCK_UNRELIABLE")
 		}
-		p := payload.(*runs.CommandRequest)
-		if p.Command == "init" || p.Command == "plan" || p.Command == "apply" {
+		stateGate := route == "result"
+		if p, ok := payload.(*runs.CommandRequest); ok {
+			stateGate = p.Command == "init" || p.Command == "plan" || p.Command == "apply"
+		}
+		if stateGate {
 			if c.ObserveSource == nil {
 				return nil, runs.Fail("SOURCE_OBSERVATION_REQUIRED")
 			}
@@ -602,10 +629,10 @@ func (c *Coordinator) executionTransition(ctx context.Context, token, route stri
 				if e = c.current(ctx, tx, w, m.Identity, true); e != nil {
 					return e
 				}
-				if e = c.executionAuthority(ctx, tx, *a); e != nil {
+				if e = c.canLaunch(ctx, tx, m.AttemptID, a.OperationID); e != nil {
 					return e
 				}
-				if e = c.canLaunch(ctx, tx, m.AttemptID, a.OperationID); e != nil {
+				if e = c.executionAuthority(ctx, tx, *a); e != nil {
 					return e
 				}
 				return c.permissionRemaining(ctx, tx, m.AttemptID, out.Permission)
@@ -641,10 +668,10 @@ func (c *Coordinator) executionTransition(ctx context.Context, token, route stri
 			if e = c.current(ctx, tx, w, m.Identity, true); e != nil {
 				return e
 			}
-			if e = c.executionAuthority(ctx, tx, *a); e != nil {
+			if e = c.canLaunch(ctx, tx, m.AttemptID, a.OperationID); e != nil {
 				return e
 			}
-			if e = c.canLaunch(ctx, tx, m.AttemptID, a.OperationID); e != nil {
+			if e = c.executionAuthority(ctx, tx, *a); e != nil {
 				return e
 			}
 			if _, e = c.executionBudget(ctx, tx, m.AttemptID, route != "prepare-result"); e != nil {
@@ -831,7 +858,15 @@ func (c *Coordinator) executionTransition(ctx context.Context, token, route stri
 			}
 		case "result":
 			p := payload.(*runs.ExecutionResult)
-			conflict, e := c.executionResult(ctx, tx, *a, m, *p, pre, sealed, permitted, &out)
+			if p.Outcome == "success" {
+				if observation == nil {
+					return runs.Fail("SOURCE_OBSERVATION_REQUIRED")
+				}
+				if e = c.RequireObservation(ctx, tx, *observation, a.Source.FactsRevision); e != nil {
+					return e
+				}
+			}
+			conflict, e := c.executionResult(ctx, tx, *a, m, *p, pre, sealed, permitted, ev.Planning, &out)
 			if e != nil {
 				return e
 			}
@@ -920,7 +955,7 @@ func (c *Coordinator) issuePermission(ctx context.Context, tx pgx.Tx, w Worker, 
 	return nil
 }
 
-// ResolveExecutionSpec resolves metadata for a future execution claim. It does
+// ResolveExecutionSpec resolves metadata for an execution claim. It does
 // not create work, claim ownership, admit a worker or contact an AWS service.
 func ResolveExecutionSpec(ctx context.Context, tx pgx.Tx, p runs.PreflightSpec, b source.Backend) (runs.ExecutionSpec, error) {
 	s := runs.ExecutionSpec{Version: 1, Phase: "execution", StackRevisionID: p.StackRevisionID, Source: p.Source, Engine: p.Engine, Workspace: p.Workspace, VarFiles: p.VarFiles, BackendFiles: p.BackendFiles, Pool: p.Pool, Backend: b, AWS: runs.ExecutionAWS{AWSRef: p.AWS}, Secrets: p.Secrets, SourceCredentials: p.SourceCredentials, Grants: p.Grants, Review: p.Review, RuleVersion: p.RuleVersion, ProfileID: p.ProfileID}

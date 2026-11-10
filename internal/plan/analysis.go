@@ -69,15 +69,18 @@ type Finding struct {
 	Coverage   string         `json:"coverage"`
 }
 type Resource struct {
-	ID               string       `json:"id"`
-	Address          string       `json:"address_display"`
-	Type             string       `json:"type"`
-	Provider         string       `json:"provider_identity"`
-	Actions          []string     `json:"actions"`
-	ReplacementOrder string       `json:"replacement_order,omitempty"`
-	ReplacementPaths [][]any      `json:"replacement_paths,omitempty"`
-	Paths            []PathChange `json:"paths"`
-	Findings         []Finding    `json:"findings"`
+	// Validated native dispatch facts; never part of the serialized display.
+	classificationType string
+	classificationMode string
+	ID                 string       `json:"id"`
+	Address            string       `json:"address_display"`
+	Type               string       `json:"type"`
+	Provider           string       `json:"provider_identity"`
+	Actions            []string     `json:"actions"`
+	ReplacementOrder   string       `json:"replacement_order,omitempty"`
+	ReplacementPaths   [][]any      `json:"replacement_paths,omitempty"`
+	Paths              []PathChange `json:"paths"`
+	Findings           []Finding    `json:"findings"`
 }
 type Coverage struct {
 	Provider      string   `json:"provider_identity"`
@@ -125,6 +128,11 @@ type nativeProfile struct{ version, registry, schema string }
 var profiles = map[string]nativeProfile{
 	"opentofu":  {"1.13.8", "registry.opentofu.org", "855291201a4219bb4b338cf189160978aacac2daadb4f7cd18e52e2bfc3baea4"},
 	"terraform": {"1.17.1", "registry.terraform.io", "af6ea57eec4fef7a117c08c265cd60a5abcc87ede68202b8121f0c8e0a1bf0b6"},
+}
+
+func SupportedRuntime(engine, version string) bool {
+	p, ok := profiles[engine]
+	return ok && version == p.version
 }
 
 func ProfileID(engine string) string {
@@ -534,12 +542,12 @@ func analyze(raw []byte, o Options, s verifiedSchema) (*Result, error) {
 						}
 					}
 				}
-				if c.Provider == r.Provider && s.semantic[r.Provider] && !supportedType(r.Type) {
+				if c.Provider == r.Provider && s.semantic[r.Provider] && !supportedType(r.classificationType) {
 					c.Variants = append(c.Variants, r.Type)
 				}
 			}
 			if kind == "resource_drift" {
-				if str(rc["mode"]) == "managed" {
+				if r.classificationMode == "managed" {
 					if e = classify(&r, s.semantic[str(rc["provider_name"])]); e != nil {
 						return nil, e
 					}
@@ -548,7 +556,7 @@ func analyze(raw []byte, o Options, s verifiedSchema) (*Result, error) {
 				out.Drift = append(out.Drift, r)
 				continue
 			}
-			if str(rc["mode"]) == "managed" {
+			if r.classificationMode == "managed" {
 				if e = classify(&r, s.semantic[str(rc["provider_name"])]); e != nil {
 					return nil, e
 				}
@@ -1299,7 +1307,7 @@ func normalizeResource(rc map[string]any, id string, reg *evidence.Registry, s v
 	if containsKnown(reg, prov) {
 		return Resource{}, ErrLeak
 	}
-	r := Resource{ID: id, Address: address, Type: typ, Provider: prov, Actions: actions(obj(rc["change"])), Paths: []PathChange{}, Findings: []Finding{}}
+	r := Resource{classificationType: str(rc["type"]), classificationMode: str(rc["mode"]), ID: id, Address: address, Type: typ, Provider: prov, Actions: actions(obj(rc["change"])), Paths: []PathChange{}, Findings: []Finding{}}
 	c := obj(rc["change"])
 	ps := s.typed.Schemas[str(rc["provider_name"])]
 	schema := ps.ResourceSchemas[str(rc["type"])]

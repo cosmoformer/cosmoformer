@@ -16,12 +16,16 @@ import (
 type LogCapture struct {
 	delivery sync.Mutex
 	upload   string
+	lastAck  int64
+	gaps     bool
 	Registry *evidence.Registry
 	Queue    evidence.Queue
 	mu       sync.Mutex
 }
 
-func NewLogCapture(registry *evidence.Registry) *LogCapture { return &LogCapture{Registry: registry} }
+func NewLogCapture(registry *evidence.Registry) *LogCapture {
+	return &LogCapture{Registry: registry, lastAck: -1}
+}
 func (c *LogCapture) Drain(stdout, stderr io.Reader, stdoutKind string) error {
 	var wg sync.WaitGroup
 	var first error
@@ -99,6 +103,16 @@ func (c *LogCapture) Flush(ctx context.Context, a *Agent, attempt string) error 
 		if e := c.Queue.Acknowledge(s.Sequence); e != nil {
 			return e
 		}
+		c.lastAck = s.Sequence
+		if s.Gap != nil {
+			c.gaps = true
+		}
 		c.upload = ""
 	}
+}
+
+func (c *LogCapture) Final() *runs.LogFinal {
+	c.delivery.Lock()
+	defer c.delivery.Unlock()
+	return &runs.LogFinal{Stream: "console", LastSequence: c.lastAck, Complete: !c.gaps}
 }

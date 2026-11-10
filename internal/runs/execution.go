@@ -273,7 +273,7 @@ type ExecutionResult struct {
 	Artifacts      []string        `json:"artifact_ids"`
 	PreInitDigest  string          `json:"pre_init_spec_digest,omitempty"`
 	ManifestDigest string          `json:"sealed_manifest_digest,omitempty"`
-	LogFinal       *LogFinal       `json:"log_final"`
+	LogFinal       *LogFinal       `json:"log_final,omitempty"`
 	NoStateChild   bool            `json:"no_state_child_created,omitempty"`
 	Reaped         bool            `json:"source_processes_reaped,omitempty"`
 	EverPermitted  bool            `json:"ever_permitted,omitempty"`

@@ -202,7 +202,7 @@ func (r ReviewedInputs) Validate(s ExecutionSpec, stack string, epoch int64) err
 			return Fail("INVALID_MANIFEST")
 		}
 		for i, p := range pair.actual {
-			f, ok := files[s.Source.RepositoryID+"/"+s.Source.Commit+"/"+path.Join(s.Source.Root, p.Path)]
+			f, ok := files[s.Source.RepositoryID+"/"+s.Source.Commit+"/"+p.Path]
 			if p.Path != pair.declared[i] || !ok || f.Size != p.Size || f.Hash != p.Hash {
 				return Fail("INVALID_MANIFEST")
 			}

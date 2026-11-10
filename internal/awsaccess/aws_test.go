@@ -577,3 +577,46 @@ func TestRedactorCapacityAndNoCredentialSerialization(t *testing.T) {
 		t.Fatal("assignment mutated")
 	}
 }
+
+func TestNondefaultWorkspaceRequiresExistingExactState(t *testing.T) {
+	for _, status := range []int{200, 403, 404} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			f := newFixture(t)
+			s := f.a.Execution
+			s.Workspace = "review"
+			b, e := source.CanonicalBackend(s.Backend.Attributes, source.BackendContext{Engine: catalog.Engine{Name: s.Engine.Name, Version: s.Engine.Version}, Workspace: s.Workspace, ExpectedOwner: s.Backend.ExpectedOwner}, s.Backend.TableARN)
+			if e != nil {
+				t.Fatal(e)
+			}
+			old := s.Backend
+			s.Backend = b
+			for i, g := range s.Grants {
+				for j, claim := range old.Claims {
+					if g.Kind == "s3_object" && g.Namespace == claim.Namespace && g.Key == claim.Key {
+						s.Grants[i].Key = b.Claims[j].Key
+					}
+				}
+			}
+			f.a.Digest = runs.Digest(s)
+			previous := f.server.Config.Handler
+			calls := 0
+			f.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == "HEAD" && r.URL.Path == "/"+b.Target.Bucket+"/"+b.Target.Key {
+					calls++
+					if r.Header.Get("X-Amz-Expected-Bucket-Owner") != b.ExpectedOwner {
+						t.Error("workspace check omitted owner")
+					}
+					w.Header().Set("Content-Length", "128")
+					w.WriteHeader(status)
+					return
+				}
+				previous.ServeHTTP(w, r)
+			})
+			a := f.mustAccess()
+			e = a.Prepare(context.Background())
+			if status == 200 && e != nil || status != 200 && e == nil || calls != 1 {
+				t.Fatal("workspace existence not enforced", e, calls)
+			}
+		})
+	}
+}

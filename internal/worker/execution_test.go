@@ -85,3 +85,25 @@ func TestCanonicalSecretNumbers(t *testing.T) {
 		t.Fatal("unbounded scalar expansion accepted")
 	}
 }
+
+func TestPermissionFinalSpawnBoundaryRechecksElapsedTime(t *testing.T) {
+	id := runs.Identity{WorkerID: runs.ID(), Generation: 1, Agent: runs.ID()}
+	permission := runs.Permission{ID: runs.ID(), Ordinal: 1, Digest: strings.Repeat("a", 64), Platform: runs.ID(), RemainingMS: 1000}
+	p, e := NewLaunchPermission(id, "attempt", permission, 0, time.Minute)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if p.Check(id, "attempt", permission.Digest, 100*time.Millisecond) != nil {
+		t.Fatal("early check failed")
+	}
+	called := false
+	if p.Spawn(id, "attempt", permission.Digest, agentClock{tick: 2 * time.Second}, func() error { called = true; return nil }) == nil || called {
+		t.Fatal("delayed exec crossed expired launch boundary")
+	}
+	if _, e = p.DiscardExpired(id, "attempt", 2*time.Second); e != nil {
+		t.Fatal("never-started expired permission could not be discarded", e)
+	}
+	if p.Spawn(id, "attempt", permission.Digest, agentClock{tick: 100 * time.Millisecond}, func() error { called = true; return nil }) == nil || called {
+		t.Fatal("discarded permission spawned")
+	}
+}

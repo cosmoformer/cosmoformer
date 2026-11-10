@@ -233,6 +233,12 @@ func TestNativeEngineCompatibility(t *testing.T) {
 		}
 		t.Logf("AWS 6.41.0 schema format %s: %d resource schemas", schema.Format, len(aws.Resources))
 		h.verifyAnalysisFixtures(checkout, rawSchema)
+		h.verifyRetainedDataSources(checkout, rawSchema)
+	})
+	t.Run("repository_relative_inputs", func(t *testing.T) {
+		h := h
+		h.t = t
+		h.repositoryRelativeInputs()
 	})
 	t.Run("required_owner_attribute_rejected", func(t *testing.T) {
 		h := h
@@ -271,6 +277,101 @@ func TestNativeEngineCompatibility(t *testing.T) {
 			dir := h.repository(fmt.Sprintf("terraform {\n backend \"s3\" {\n bucket = %q\n key = \"paths//state\"\n region = \"eu-west-1\"\n encrypt = true\n use_lockfile = true\n%s }\n}\n", nativeBucket, nativeEndpointConfig(b)))()
 			h.reject(dir, "review", `must not contain "//"`, "init", "-input=false", "-no-color")
 		})
+	}
+}
+
+func (h nativeHarness) repositoryRelativeInputs() {
+	t := h.t
+	b := newNativeBackend(t)
+	checkout := h.repository("# Native cwd is infra; explicit input paths are repository-relative.\n")()
+	root := filepath.Join(checkout, "infra")
+	for _, dir := range []string{root, filepath.Join(checkout, "config"), filepath.Join(root, "config")} {
+		if e := os.MkdirAll(dir, 0700); e != nil {
+			t.Fatal(e)
+		}
+	}
+	writeNative(t, filepath.Join(root, "main.tf"), []byte("terraform {\n backend \"s3\" {}\n}\nvariable \"label\" { type = string }\noutput \"fixture\" { value = var.label }\n"))
+	backendPath := filepath.Join(checkout, "config", "state.hcl")
+	const key = "approved/state.tfstate"
+	backend := fmt.Sprintf("bucket = %q\nkey = %q\nregion = \"eu-west-1\"\nencrypt = true\nuse_lockfile = true\n%s", nativeBucket, key, nativeEndpointConfig(b))
+	writeNative(t, backendPath, []byte(backend))
+	writeNative(t, filepath.Join(root, "config", "state.hcl"), []byte(strings.Replace(backend, key, "unreserved/state.tfstate", 1)))
+	for _, pair := range []struct{ name, value string }{{"first.tfvars", "first repository input"}, {"last.tfvars", "last repository input"}} {
+		writeNative(t, filepath.Join(checkout, "config", pair.name), []byte(fmt.Sprintf("label = %q\n", pair.value)))
+		writeNative(t, filepath.Join(root, "config", pair.name), []byte("label = \"wrong nested input\"\n"))
+	}
+	// Endpoint instrumentation stays exclusively in this isolated native fixture.
+	// The protocol/unit suite separately verifies the worker resolves these paths.
+	h.run(root, "default", 0, append(runs.FixedFlags("init"), "-backend-config="+backendPath)...)
+	schema := h.run(root, "default", 0, runs.FixedFlags("schema")...)
+	retained := filepath.Join(t.TempDir(), "plan.bin")
+	args := append(runs.FixedFlags("plan"), "-out="+retained)
+	for _, name := range []string{"first.tfvars", "last.tfvars"} {
+		args = append(args, "-var-file="+filepath.Join(checkout, "config", name))
+	}
+	h.run(root, "default", 2, args...)
+	raw := h.run(root, "default", 0, append(runs.FixedFlags("show"), retained)...)
+	var shown struct {
+		Outputs map[string]struct{ After string } `json:"output_changes"`
+	}
+	if json.Unmarshal(raw, &shown) != nil || shown.Outputs["fixture"].After != "last repository input" {
+		t.Fatal("native cwd changed explicit variable-file resolution or precedence")
+	}
+	h.verifyNativeAnalysis(root, schema, raw)
+	objects, events := b.snapshot()
+	state, lock, released := false, false, false
+	for _, ev := range events {
+		if ev.Service != "s3" || ev.Method == "LIST" {
+			continue
+		}
+		if ev.Key != key && ev.Key != key+".tflock" {
+			t.Fatal("nested backend shadow selected another target", ev.Key)
+		}
+		state = state || ev.Key == key && (ev.Method == "GET" || ev.Method == "HEAD")
+		lock = lock || ev.Key == key+".tflock" && ev.Method == "PUT"
+		released = released || ev.Key == key+".tflock" && ev.Method == "DELETE"
+	}
+	if !state || !lock || !released || objects[key+".tflock"] != nil {
+		t.Fatal("approved native state/lock lifecycle not exercised or not released")
+	}
+}
+
+func (h nativeHarness) verifyRetainedDataSources(dir string, schema []byte) {
+	base := h.analysisOptions(dir, schema)
+	for _, kind := range []string{"resource_changes", "resource_drift"} {
+		for _, action := range []string{"no-op", "read"} {
+			for _, masked := range []bool{false, true} {
+				h.t.Run(fmt.Sprintf("retained_data_source/%s/%s/masked=%t", kind, action, masked), func(t *testing.T) {
+					before := any(map[string]any{"id": "sg-synthetic"})
+					if action == "read" {
+						before = nil
+					}
+					const address = "data.aws_security_group.fixture"
+					entry := map[string]any{"address": address, "mode": "data", "type": "aws_security_group", "name": "fixture", "provider_name": h.profile.Packages[1].Sources[0], "change": map[string]any{"actions": []string{action}, "before": before, "after": map[string]any{"id": "sg-synthetic"}, "after_unknown": false, "before_sensitive": false, "after_sensitive": false}}
+					raw, _ := json.Marshal(map[string]any{"format_version": "1.2", "terraform_version": h.profile.Version, "planned_values": map[string]any{}, "configuration": map[string]any{}, kind: []any{entry}})
+					options := base
+					options.ResourceIDs = map[string]string{address: runs.ID()}
+					options.Secrets = &evidence.Registry{}
+					if masked {
+						if e := options.Secrets.Register("aws_security_group"); e != nil {
+							t.Fatal(e)
+						}
+					}
+					expected, e := plan.Analyze(raw, schema, options)
+					if e != nil {
+						t.Fatal("data-source fixture rejected by actual provider schema", e)
+					}
+					encoded, _ := json.Marshal(expected)
+					var decoded plan.Result
+					if json.Unmarshal(encoded, &decoded) != nil || plan.VerifySanitized(expected, &decoded) != nil {
+						t.Fatal("retained data source received managed-resource rules")
+					}
+					if len(decoded.Findings) != 0 || bytes.Contains(encoded, []byte("classification")) || masked && bytes.Contains(encoded, []byte("aws_security_group")) {
+						t.Fatal("data source gained managed warnings or exposed private dispatch")
+					}
+				})
+			}
+		}
 	}
 }
 
@@ -702,11 +803,40 @@ func (h nativeHarness) verifyAnalysisFixtures(dir string, schema []byte) {
 					t.Fatalf("unexpected native finding: %+v", f)
 				}
 			}
+			retained, _ := json.Marshal(out)
+			var decoded plan.Result
+			if json.Unmarshal(retained, &decoded) != nil || plan.VerifySanitized(out, &decoded) != nil {
+				t.Fatal("native retained analysis failed independent verification")
+			}
+			if resources, ok := native["resource_changes"].([]any); ok && len(resources) == 1 {
+				typ, _ := resources[0].(map[string]any)["type"].(string)
+				if typ != "" {
+					if options.Secrets.Register(typ) != nil {
+						t.Fatal("mask registry")
+					}
+					masked, err := plan.Analyze(raw, schema, options)
+					if err != nil {
+						t.Fatal("masked native dispatch", err)
+					}
+					if len(masked.Findings) != len(out.Findings) {
+						t.Fatal("masked native dispatch omitted warnings")
+					}
+					for i, finding := range masked.Findings {
+						if finding.Rule != out.Findings[i].Rule || finding.Severity != out.Findings[i].Severity {
+							t.Fatal("masked native dispatch downgraded warning")
+						}
+					}
+					public, _ := json.Marshal(masked)
+					if bytes.Contains(public, []byte(typ)) {
+						t.Fatal("masked identifier serialized")
+					}
+				}
+			}
 		})
 	}
 	if t.Failed() {
 		return
 	}
 	hash := sha256.Sum256(schema)
-	t.Logf("verified profile %s: AWS 6.41.0, raw schema SHA-256 %x, %d synthetic analysis cases against actual native schema; production execution disabled; company not_assessed", o.ProfileID, hash, len(fixture.Cases))
+	t.Logf("verified profile %s: AWS 6.41.0, raw schema SHA-256 %x, %d synthetic analysis cases against actual native schema; company execution remains not_assessed", o.ProfileID, hash, len(fixture.Cases))
 }

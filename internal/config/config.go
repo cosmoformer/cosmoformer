@@ -8,24 +8,51 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
 type Config struct {
-	Listen, Origin, DSNFile, UnixSocket string
-	Artifact                            evidence.Settings
+	Listen, Origin, DSNFile, UnixSocket         string
+	Artifact                                    evidence.Settings
+	PlanSeconds, PreflightSeconds, PlanTTLHours int64
 }
 
 func Load() (Config, error) {
 	c := Config{Listen: os.Getenv("COSMOFORMER_LISTEN"), Origin: os.Getenv("COSMOFORMER_ORIGIN"), DSNFile: os.Getenv("COSMOFORMER_DATABASE_DSN_FILE")}
 	c.Artifact = evidence.Settings{Bucket: os.Getenv("COSMOFORMER_ARTIFACT_BUCKET"), Region: os.Getenv("COSMOFORMER_ARTIFACT_REGION"), Owner: os.Getenv("COSMOFORMER_ARTIFACT_EXPECTED_OWNER")}
 	c.UnixSocket = os.Getenv("COSMOFORMER_UNIX_SOCKET")
+	readBound := func(key string, fallback, lo, hi int64) (int64, error) {
+		v := os.Getenv("COSMOFORMER_" + key)
+		if v == "" {
+			return fallback, nil
+		}
+		n, e := strconv.ParseInt(v, 10, 64)
+		if e != nil || n < lo || n > hi {
+			return 0, errors.New("invalid planning budget or TTL setting")
+		}
+		return n, nil
+	}
+	var budgetErr error
+	if c.PlanSeconds, budgetErr = readBound("PLAN_SECONDS", 1200, 30, 3300); budgetErr != nil {
+		return c, budgetErr
+	}
+	if c.PreflightSeconds, budgetErr = readBound("PREFLIGHT_SECONDS", 300, 30, 3300); budgetErr != nil {
+		return c, budgetErr
+	}
+	if c.PlanTTLHours, budgetErr = readBound("PLAN_TTL_HOURS", 168, 1, 720); budgetErr != nil {
+		return c, budgetErr
+	}
 	if c.Listen == "" && c.UnixSocket == "" {
 		c.Listen = "127.0.0.1:18080"
 	}
 	return c, c.Validate()
 }
 func (c Config) Validate() error {
+	if c.PlanSeconds != 0 && (c.PlanSeconds < 30 || c.PlanSeconds > 3300) || c.PreflightSeconds != 0 && (c.PreflightSeconds < 30 || c.PreflightSeconds > 3300) || c.PlanTTLHours != 0 && (c.PlanTTLHours < 1 || c.PlanTTLHours > 720) {
+		return errors.New("invalid planning budget or TTL setting")
+	}
+
 	if c.Artifact != (evidence.Settings{}) {
 		if e := c.Artifact.Validate(); e != nil {
 			return errors.New("invalid artifact storage settings")

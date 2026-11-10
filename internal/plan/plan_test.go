@@ -627,3 +627,147 @@ func TestDriftCoverageDoesNotImplyDefaultVariantSupport(t *testing.T) {
 		t.Fatal("drift gained action counts or unimplemented semantic coverage")
 	}
 }
+
+// Display masking must never change the validated rule dispatch or severity.
+func TestMaskedResourceClassification(t *testing.T) {
+	s := fixtureSchema(t)
+	for _, f := range loadFixtures(t) {
+		v, err := strictJSON(f.Plan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		entries := list(obj(v)["resource_changes"])
+		if len(entries) != 1 {
+			continue
+		}
+		typ := str(obj(entries[0])["type"])
+		if !supportedType(typ) {
+			continue
+		}
+		t.Run(f.Name, func(t *testing.T) {
+			o := fixtureOptions(t, f.Plan)
+			for _, value := range f.Secrets {
+				terms, err := evidence.SecretTerms(value.Value, value.JSON)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = o.Secrets.Register(terms...); err != nil {
+					t.Fatal(err)
+				}
+			}
+			secret := typ
+			if typ == "aws_db_instance" {
+				secret = "db_instance"
+			}
+			if err := o.Secrets.Register(secret); err != nil {
+				t.Fatal(err)
+			}
+			out, err := analyze(f.Plan, o, s)
+			if f.Error {
+				if err == nil || out != nil {
+					t.Fatal("masked invalid evidence did not fail closed")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := out.Resources[0]
+			if r.Type != "hidden" || r.Address != "hidden" {
+				t.Fatal("matched identifiers exposed")
+			}
+			if len(out.Findings) != len(f.Expected) {
+				t.Fatalf("masked dispatch lost findings: got %+v, want %+v", out.Findings, f.Expected)
+			}
+			for i, want := range f.Expected {
+				got := out.Findings[i]
+				if got.Rule != want.Rule || got.Severity != want.Severity || want.Message != "" && got.Message != want.Message {
+					t.Fatalf("masked dispatch changed warning: got %+v, want %+v", got, want)
+				}
+			}
+			raw, err := json.Marshal(out)
+			if err != nil || bytes.Contains(raw, []byte(secret)) || validateRegistry(raw, o.Secrets) != nil {
+				t.Fatal("serialized result leaked masked identifier")
+			}
+			if len(out.Coverage[0].Variants) != 0 {
+				t.Fatal("masked supported type became an unsupported variant")
+			}
+		})
+	}
+}
+
+func TestRetainedSanitizedRulesCannotBeOmitted(t *testing.T) {
+	s := fixtureSchema(t)
+	for _, f := range loadFixtures(t) {
+		if f.Error || len(f.Expected) == 0 || len(f.Secrets) > 0 {
+			continue
+		}
+		t.Run(f.Name, func(t *testing.T) {
+			options := fixtureOptions(t, f.Plan)
+			expected, e := analyze(f.Plan, options, s)
+			if e != nil {
+				t.Fatal(e)
+			}
+			raw, _ := json.Marshal(expected)
+			var decoded Result
+			if json.Unmarshal(raw, &decoded) != nil {
+				t.Fatal("decode safe artifact")
+			}
+			if e = VerifySanitized(expected, &decoded); e != nil {
+				t.Fatal("valid retained artifact rejected", e)
+			}
+			decoded.Resources[0].Findings = []Finding{}
+			decoded.Findings = []Finding{}
+			decoded.Summary.Findings = map[string]int{}
+			if VerifySanitized(expected, &decoded) == nil {
+				t.Fatal("omitted warnings accepted")
+			}
+		})
+	}
+}
+
+func TestRetainedDataSourcesDoNotReceiveManagedRules(t *testing.T) {
+	s := fixtureSchema(t)
+	// A data-source schema has no managed ingress collection. The native matrix
+	// repeats this check against each pinned provider's complete actual schema.
+	ps := s.typed.Schemas["registry.opentofu.org/hashicorp/aws"]
+	if e := json.Unmarshal([]byte(`{"data_source_schemas":{"aws_security_group":{"version":0,"block":{"attributes":{"id":{"type":"string","computed":true}}}}}}`), ps); e != nil {
+		t.Fatal(e)
+	}
+	for _, kind := range []string{"resource_changes", "resource_drift"} {
+		for _, action := range []string{"no-op", "read"} {
+			t.Run(kind+"/"+action, func(t *testing.T) {
+				before := any(map[string]any{"id": "sg-synthetic"})
+				if action == "read" {
+					before = nil
+				}
+				entry := map[string]any{"address": "data.aws_security_group.fixture", "mode": "data", "type": "aws_security_group", "name": "fixture", "provider_name": "registry.opentofu.org/hashicorp/aws", "change": map[string]any{"actions": []string{action}, "before": before, "after": map[string]any{"id": "sg-synthetic"}, "after_unknown": false, "before_sensitive": false, "after_sensitive": false}}
+				raw, _ := json.Marshal(map[string]any{"format_version": "1.2", "terraform_version": "1.13.8", "planned_values": map[string]any{}, "configuration": map[string]any{}, kind: []any{entry}})
+				options := fixtureOptions(t, raw)
+				if e := options.Secrets.Register("aws_security_group"); e != nil {
+					t.Fatal(e)
+				}
+				expected, e := analyze(raw, options, s)
+				if e != nil {
+					t.Fatal(e)
+				}
+				encoded, _ := json.Marshal(expected)
+				var decoded Result
+				if json.Unmarshal(encoded, &decoded) != nil || VerifySanitized(expected, &decoded) != nil {
+					t.Fatal("valid retained data source rejected")
+				}
+				if bytes.Contains(encoded, []byte("aws_security_group")) || bytes.Contains(encoded, []byte("classification")) {
+					t.Fatal("private data-source dispatch facts serialized")
+				}
+				resources := decoded.Resources
+				if kind == "resource_drift" {
+					resources = decoded.Drift
+				}
+				resources[0].Findings = []Finding{{Rule: "CF-ACTION-DELETE"}}
+				if VerifySanitized(expected, &decoded) == nil {
+					t.Fatal("invented data-source warning accepted")
+				}
+			})
+		}
+	}
+}

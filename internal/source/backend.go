@@ -50,8 +50,11 @@ type File struct {
 	SHA256 string `json:"sha256"`
 }
 type Module struct {
-	Path   string `json:"path"`
-	Source string `json:"source"`
+	// Local inspection provenance never enters wire metadata or digests.
+	Checkout        string `json:"-"`
+	CallerDirectory string `json:"-"`
+	Path            string `json:"path"`
+	Source          string `json:"source"`
 }
 type Inspection struct {
 	Backend Backend  `json:"backend"`
@@ -294,6 +297,7 @@ func InspectResolved(root string, s catalog.Stack, tableARN string, resolve Reso
 	a := map[string]any{}
 	backends := 0
 	seen := map[string]bool{}
+	active := map[string]bool{}
 	variables := map[string]bool{}
 	roots := map[string]string{root: ""}
 	var visit func(string, string, int) error
@@ -301,10 +305,16 @@ func InspectResolved(root string, s catalog.Stack, tableARN string, resolve Reso
 		if depth > 32 || len(seen) > 256 || !catalog.RepoPath(dir) {
 			return ErrSource
 		}
-		if seen[tree+"/"+dir] {
+		key := tree + "/" + dir
+		if active[key] {
+			return ErrSource
+		}
+		if seen[key] {
 			return nil
 		}
-		seen[tree+"/"+dir] = true
+		seen[key] = true
+		active[key] = true
+		defer delete(active, key)
 		entries, e := os.ReadDir(filepath.Join(tree, filepath.FromSlash(dir)))
 		if e != nil {
 			return ErrSource
@@ -357,7 +367,7 @@ func InspectResolved(root string, s catalog.Stack, tableARN string, resolve Reso
 						return ErrSource
 					}
 					src := v.AsString()
-					out.Modules = append(out.Modules, Module{roots[tree] + path.Join(dir, block.Labels[0]), src})
+					out.Modules = append(out.Modules, Module{Path: roots[tree] + path.Join(dir, block.Labels[0]), Source: src, Checkout: tree, CallerDirectory: dir})
 					if strings.HasPrefix(src, "./") || strings.HasPrefix(src, "../") {
 						next := path.Join(dir, src)
 						if !catalog.RepoPath(next) {
@@ -380,7 +390,9 @@ func InspectResolved(root string, s catalog.Stack, tableARN string, resolve Reso
 							return ErrSource
 						}
 						sum := sha256.Sum256([]byte(src))
-						roots[remoteRoot] = "modules/" + hex.EncodeToString(sum[:]) + "/"
+						if remoteRoot != root {
+							roots[remoteRoot] = "modules/" + hex.EncodeToString(sum[:]) + "/"
+						}
 						if e = visit(remoteRoot, remote.Subdirectory, depth+1); e != nil {
 							return e
 						}

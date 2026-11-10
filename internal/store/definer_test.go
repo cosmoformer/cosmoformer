@@ -92,7 +92,13 @@ func TestVersionEightDefinerUpgrade(t *testing.T) {
 	sqlOK(t, db.Owner, `DO $$ DECLARE f regprocedure; BEGIN
  FOR f IN SELECT p.oid::regprocedure FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='cosmoformer' AND p.prosecdef LOOP
  EXECUTE format('ALTER FUNCTION %s SET search_path=pg_catalog,cosmoformer',f);
- END LOOP; END $$; UPDATE cosmoformer.schema_version SET version=8`)
+ END LOOP; END $$;
+ DROP TRIGGER ready_plan_identity ON cosmoformer.plans;
+ DROP FUNCTION cosmoformer.ready_plan_identity();
+ DROP TRIGGER planning_intent_identity ON cosmoformer.operations;
+ DROP FUNCTION cosmoformer.planning_intent_identity();
+ ALTER TABLE cosmoformer.operations DROP COLUMN native_planning;
+ UPDATE cosmoformer.schema_version SET version=8`)
 	snapshot := func() string {
 		t.Helper()
 		var value string

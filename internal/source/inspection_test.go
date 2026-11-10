@@ -81,7 +81,8 @@ func TestInspectionRetainsModuleClosureAndSensitiveInputs(t *testing.T) {
 module "local" { source = "./local" }
 module "remote" { source = "`+url+`" }
 `)
-	writeFixture(t, root, "local/main.tf", `module "again" { source = "../local" }`)
+	writeFixture(t, root, "local/main.tf", `module "again" { source = "../shared" }`)
+	writeFixture(t, root, "shared/main.tf", `output "shared" { value = "synthetic" }`)
 	writeFixture(t, remote, "service/main.tf", `output "fixture" { value = "local only" }`)
 	writeFixture(t, root, "state.hcl", `key = "overridden.tfstate"`)
 	writeFixture(t, root, "values.tfvars", `label = "fictional"`)
@@ -297,5 +298,13 @@ func TestModuleResolverPreservesUnprovenStop(t *testing.T) {
 		if !errors.Is(e, sentinel) {
 			t.Fatal("module resolver error identity lost", e)
 		}
+	}
+}
+
+func TestInspectionRejectsModuleCyclesBeforeNativeInit(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "main.tf", backendFixture+`module "self" {source="./"}`)
+	if _, e := Inspect(root, inspectionStack(), ""); e == nil {
+		t.Fatal("cyclic module closure accepted")
 	}
 }
