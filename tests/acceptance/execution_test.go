@@ -40,6 +40,9 @@ func newExecutionFixture(t *testing.T) *executionFixture {
 	return newExecutionFixtureForSource(t, map[string]any{"kind": "branch"})
 }
 func newExecutionFixtureForSource(t *testing.T, source map[string]any) *executionFixture {
+	return newExecutionFixtureForSourceProfile(t, source, false)
+}
+func newExecutionFixtureForSourceProfile(t *testing.T, source map[string]any, review bool) *executionFixture {
 	t.Helper()
 	f := newPreflightFixtureForSource(t, syntheticNativeEvidence{}, source)
 	ctx := context.Background()
@@ -69,6 +72,10 @@ func newExecutionFixtureForSource(t *testing.T, source map[string]any) *executio
 	secret := id(f.admin.call("POST", "/organizations/"+f.org+"/secrets", map[string]any{"project_id": project, "name": "native input", "value": secretValue}, 200))
 	ref := runs.SecretRef{ID: secret, Scope: "project", Revision: 1, Destination: "TF_VAR_credential"}
 	grant := id(f.admin.call("POST", "/organizations/"+f.org+"/resource-grants", map[string]any{"project_id": project, "kind": "secret", "resource_id": secret}, 200))
+	if review {
+		p.RuleVersion = plan.RuleVersion
+		p.ProfileID = plan.ProfileID("opentofu")
+	}
 	p.Secrets = []runs.SecretRef{ref}
 	p.Grants = append(p.Grants, runs.ResourceRef{ID: grant, Kind: "secret", ResourceID: secret, Revision: 1})
 	f.exec(t, `UPDATE cosmoformer.aws_connections SET expected_bootstrap_principal='arn:aws:iam::111122223333:role/synthetic-bootstrap',session_seconds=3600,revision=revision+1 WHERE id=$1`, p.AWS.ID)

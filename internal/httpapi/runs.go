@@ -64,10 +64,22 @@ type ReceiptOutput struct {
 }
 type StacksOutput struct {
 	Body struct {
-		Stacks []StackPublic `json:"stacks"`
+		Stacks []StackPublic `json:"stacks" nullable:"false"`
+		Next   string        `json:"next_cursor,omitempty"`
 	}
 }
 type StackPublic struct {
+	ProjectName     string `json:"project_name"`
+	EnvironmentName string `json:"environment_name"`
+	Repository      string `json:"repository_id" format:"uuid"`
+	SourceURL       string `json:"source_url"`
+	Branch          string `json:"tracked_branch"`
+	Root            string `json:"root"`
+	Assessment      string `json:"assessment" enum:"not_assessed,compatible,incompatible"`
+	CheckReason     string `json:"check_reason"`
+	PlanReason      string `json:"plan_reason"`
+	CanReview       bool   `json:"can_review"`
+
 	ID            string `json:"id" format:"uuid"`
 	Name          string `json:"name"`
 	ProjectID     string `json:"project_id" format:"uuid"`
@@ -149,34 +161,6 @@ func (a *Server) registerSourceActions(api huma.API) {
 			}
 			return out, store.Audit(ctx, tx, in.Org, actor.ID, "repository.sync", in.ID)
 		})
-	})
-	register(api, "GET", "/organizations/{org}/stacks", "stacks", func(ctx context.Context, in *OrgPath) (*StacksOutput, error) {
-		out := &StacksOutput{}
-		out.Body.Stacks = []StackPublic{}
-		e := a.tx(ctx, in.Org, func(tx pgx.Tx, actor store.Actor) error {
-			g, e := store.GrantsFor(ctx, tx, actor.ID)
-			if e != nil {
-				return e
-			}
-			rows, e := tx.Query(ctx, `SELECT s.id::text,s.display_name,s.project_id::text,s.environment_id::text,r.commit,s.archived,s.assessment='compatible' FROM cosmoformer.stacks s JOIN cosmoformer.stack_revisions r ON r.id=s.effective_revision_id ORDER BY s.display_name,s.id`)
-			if e != nil {
-				return e
-			}
-			defer rows.Close()
-			for rows.Next() {
-				var s StackPublic
-				if e = rows.Scan(&s.ID, &s.Name, &s.ProjectID, &s.EnvironmentID, &s.Commit, &s.Archived, &s.CanNativePlan); e != nil {
-					return e
-				}
-				if access.Allows(g, s.ProjectID, s.EnvironmentID, access.View) || access.Allows(g, s.ProjectID, s.EnvironmentID, access.Manage) {
-					s.CanPlan = access.Allows(g, s.ProjectID, s.EnvironmentID, access.Plan)
-					s.CanNativePlan = s.CanNativePlan && s.CanPlan
-					out.Body.Stacks = append(out.Body.Stacks, s)
-				}
-			}
-			return rows.Err()
-		})
-		return out, e
 	})
 	register(api, "POST", "/organizations/{org}/stacks/{id}/plans", "request-preflight", func(ctx context.Context, in *PlanInput) (*ReceiptOutput, error) {
 		if in.Body.Source.Kind == "branch" && in.Body.Source.PR != 0 || in.Body.Source.Kind == "pr" && in.Body.Source.PR < 1 {

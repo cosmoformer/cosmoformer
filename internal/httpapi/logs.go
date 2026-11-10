@@ -39,7 +39,7 @@ type LogBatch struct {
 	Cursor   string             `json:"cursor"`
 	Reset    bool               `json:"reset"`
 	Reason   string             `json:"reset_reason,omitempty"`
-	Segments []evidence.Segment `json:"segments"`
+	Segments []evidence.Segment `json:"segments" nullable:"false"`
 	Complete bool               `json:"archive_complete"`
 	More     bool               `json:"has_more"`
 }
@@ -156,7 +156,7 @@ func (a *Server) registerLogs(api huma.API) {
 					err := json.NewDecoder(f).Decode(&payload)
 					f.Close()
 					os.Remove(f.Name())
-					if err != nil || payload.Validate() != nil || payload.Text == nil {
+					if err != nil || payload.Validate() != nil || payload.Text == nil || payload.Sequence != s.Sequence || payload.Start != s.Start || payload.End != s.End {
 						unavailable = true
 						s.Gap = &evidence.Gap{Reason: "archive_invalid"}
 					} else {

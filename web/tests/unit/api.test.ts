@@ -81,3 +81,31 @@ describe('API requests and the Go-owned response contract', () => {
         expect(fetch).toHaveBeenCalledTimes(1);
     });
 });
+
+it('enforces Go-owned lossless value and mutually exclusive log-segment contracts', async () => {
+    const validators = await import('../../app/.generated/validators.js');
+    for (const value of [{ state: 'hidden' }, { state: 'unknown' }, { state: 'null' }, { state: 'absent' }, { state: 'known', type: 'boolean', value: false }, { state: 'known', type: 'number', value: '9007199254740993' }, { state: 'known', type: 'object', value: { safe: { state: 'known', type: 'array', value: [{ state: 'hidden' }] } } }]) expect(validators.Value(value)).toBe(true);
+    for (const value of [{ state: 'hidden', value: 'secret' }, { state: 'unknown', type: 'number' }, { state: 'known', type: 'number', value: 9007199254740992 }, { state: 'known', type: 'number', value: '1e30' }, { state: 'known', type: 'boolean', value: 'false' }, { state: 'known', type: 'object', value: { bad: { state: 'absent', raw: 'secret' } } }]) expect(validators.Value(value)).toBe(false);
+    const base = { sequence: 0, byte_start: 0, byte_end: 5 };
+    expect(validators.Segment({ ...base, text: '<script>text only</script>' })).toBe(true);
+    expect(validators.Segment({ ...base, gap: { reason: 'archive_unavailable', unknown_extent: false } })).toBe(true);
+    expect(validators.Segment({ ...base, text: 'text', gap: { reason: 'unknown', unknown_extent: true } })).toBe(false);
+    expect(validators.Segment(base)).toBe(false);
+});
+
+it('ignores expiry side effects from a superseded, aborted read', async () => {
+    let resolve!: (response: Response) => void;
+    vi.mocked(fetch).mockReturnValueOnce(new Promise<Response>(yes => { resolve = yes; }));
+    const controller = new AbortController(), expired = vi.fn();
+    window.addEventListener('cosmoformer:expired', expired);
+    try {
+        const pending = api('/old-scope', 'SessionOutputBody', { signal: controller.signal });
+        controller.abort(); setCSRF('current-session-csrf');
+        resolve(reply({ code: 'SIGN_IN_REQUIRED', message: 'Old session expired.' }, 401));
+        await expect(pending).rejects.toMatchObject({ status: 401 });
+        expect(expired).not.toHaveBeenCalled();
+        vi.mocked(fetch).mockResolvedValueOnce(reply({ ok: true }));
+        await api('/explicit-current-action', 'OKBody', { method: 'POST' });
+        expect(vi.mocked(fetch).mock.lastCall?.[1]?.headers).toMatchObject({ 'X-CSRF-Token': 'current-session-csrf' });
+    } finally { window.removeEventListener('cosmoformer:expired', expired); }
+});

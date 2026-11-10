@@ -3,6 +3,7 @@ package plan
 import (
 	"encoding/json"
 	"reflect"
+	"sort"
 
 	"github.com/cosmoformer/cosmoformer/internal/evidence"
 )
@@ -82,12 +83,49 @@ func VerifySanitized(expected, actual *Result) error {
 	if digest(expected.Notices) != digest(actual.Notices) {
 		return ErrInvalid
 	}
-	if len(expected.Coverage) != len(actual.Coverage) {
+	if actual.Coverage == nil || len(expected.Coverage) != len(actual.Coverage) {
 		return ErrInvalid
 	}
 	for i, e := range expected.Coverage {
 		a := actual.Coverage[i]
-		if a.Provider != e.Provider || a.Version != e.Version || a.Schema != e.Schema {
+		// Derive limitations from independently validated private resource types,
+		// then the verified safe values. Worker-only masking may add uncertainty
+		// or hide a variant label, but cannot remove its unsupported limitation.
+		derived := Coverage{e.Provider, e.Version, e.Schema, "supported", []string{}, []string{}}
+		if e.Status == "generic_only" {
+			derived.Status = "generic_only"
+		}
+		for _, pair := range [][2][]Resource{{expected.Resources, actual.Resources}, {expected.Drift, actual.Drift}} {
+			byID := map[string]Resource{}
+			for _, r := range pair[0] {
+				byID[r.ID] = r
+			}
+			for _, r := range pair[1] {
+				if r.Provider != e.Provider {
+					continue
+				}
+				if e.Status != "generic_only" && !supportedType(byID[r.ID].classificationType) {
+					derived.Variants = append(derived.Variants, r.Type)
+				}
+				for _, p := range r.Paths {
+					if uncertainTree(p.Before) || uncertainTree(p.After) {
+						derived.UnknownHidden = append(derived.UnknownHidden, r.ID)
+						break
+					}
+				}
+			}
+		}
+		sort.Strings(derived.Variants)
+		derived.Variants = unique(derived.Variants)
+		sort.Strings(derived.UnknownHidden)
+		derived.UnknownHidden = unique(derived.UnknownHidden)
+		if derived.Status == "supported" && len(derived.UnknownHidden) > 0 {
+			derived.Status = "valid_with_unknown_hidden"
+		}
+		if len(derived.Variants) > 0 {
+			derived.Status = "partial"
+		}
+		if digest(a) != digest(derived) {
 			return ErrInvalid
 		}
 	}

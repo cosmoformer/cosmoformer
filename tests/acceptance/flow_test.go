@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cosmoformer/cosmoformer/internal/evidence"
 	"github.com/cosmoformer/cosmoformer/internal/httpapi"
 	"github.com/cosmoformer/cosmoformer/internal/identity"
 	"github.com/cosmoformer/cosmoformer/internal/testsupport"
@@ -287,7 +288,17 @@ func TestBrowserServer(t *testing.T) {
 	if os.Getenv("COSMOFORMER_TEST_BROWSER") != "1" {
 		t.Skip("browser fixture server is explicitly selected by make browser-server")
 	}
-	db := testsupport.NewDatabase(t)
+	// The browser runner's repository TMPDIR can exceed Unix credential-helper
+	// socket path limits. Keep only this suite's owned worker fixture root short.
+	short, err := os.MkdirTemp("/tmp", "cf-browser-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(short) })
+	t.Setenv("TMPDIR", short)
+	f := newExecutionFixtureForSourceProfile(t, map[string]any{"kind": "branch"}, true)
+	review := finishReviewFixture(t, f, false)
+	db := f.db
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	h := identity.NewHasher()
@@ -299,13 +310,13 @@ func TestBrowserServer(t *testing.T) {
 	if _, e = db.Owner.Exec(ctx, `INSERT INTO cosmoformer.accounts(username,display_name,installation_admin,password_phc) VALUES('browseradmin','Browser administrator',true,$1)`, phc); e != nil {
 		t.Fatal(e)
 	}
-	b, _ := json.Marshal(map[string]string{"username": "browseradmin", "password": pass})
+	b, _ := json.Marshal(map[string]any{"username": "browseradmin", "password": pass, "review_username": "admin", "review_password": password, "review": review, "org": f.org})
 	file := "../../.build/testdb/browser.json"
 	if e = os.WriteFile(file, b, 0600); e != nil {
 		t.Fatal(e)
 	}
 	defer os.Remove(file)
-	handler, _ := httpapi.New(db.App, "https://localhost:5174")
+	handler, _ := httpapi.NewWithOptions(db.App, "https://localhost:5174", httpapi.Options{Evidence: &evidence.Custody{Storage: f.storage, Bucket: "synthetic"}, Clock: f.ticks})
 	server := &http.Server{Addr: "127.0.0.1:18081", Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	done := make(chan error, 1)
 	go func() { done <- server.ListenAndServe() }()

@@ -61,12 +61,12 @@ type PathChange struct {
 type Finding struct {
 	ID         string         `json:"id"`
 	Rule       string         `json:"rule_id"`
-	Severity   string         `json:"severity"`
+	Severity   string         `json:"severity" enum:"critical,high,attention,unknown_detail"`
 	ResourceID string         `json:"resource_id"`
 	Path       []any          `json:"path"`
 	Message    string         `json:"message_code"`
 	Arguments  map[string]any `json:"arguments"`
-	Coverage   string         `json:"coverage"`
+	Coverage   string         `json:"coverage" nullable:"false"`
 }
 type Resource struct {
 	// Validated native dispatch facts; never part of the serialized display.
@@ -76,34 +76,34 @@ type Resource struct {
 	Address            string       `json:"address_display"`
 	Type               string       `json:"type"`
 	Provider           string       `json:"provider_identity"`
-	Actions            []string     `json:"actions"`
+	Actions            []string     `json:"actions" nullable:"false"`
 	ReplacementOrder   string       `json:"replacement_order,omitempty"`
-	ReplacementPaths   [][]any      `json:"replacement_paths,omitempty"`
-	Paths              []PathChange `json:"paths"`
-	Findings           []Finding    `json:"findings"`
+	ReplacementPaths   [][]any      `json:"replacement_paths,omitempty" nullable:"false"`
+	Paths              []PathChange `json:"paths" nullable:"false"`
+	Findings           []Finding    `json:"findings" nullable:"false"`
 }
 type Coverage struct {
 	Provider      string   `json:"provider_identity"`
 	Version       string   `json:"provider_version"`
 	Schema        string   `json:"schema_sha256"`
-	Status        string   `json:"status"`
-	Variants      []string `json:"unsupported_variants"`
-	UnknownHidden []string `json:"unknown_hidden_resources"`
+	Status        string   `json:"status" enum:"supported,generic_only,partial,valid_with_unknown_hidden"`
+	Variants      []string `json:"unsupported_variants" nullable:"false"`
+	UnknownHidden []string `json:"unknown_hidden_resources" nullable:"false"`
 }
 type Summary struct {
-	Actions  map[string]int `json:"actions"`
-	Findings map[string]int `json:"findings"`
+	Actions  map[string]int `json:"actions" nullable:"false"`
+	Findings map[string]int `json:"findings" nullable:"false"`
 }
 type Result struct {
 	RuleVersion string     `json:"rule_version"`
 	ProfileID   string     `json:"profile_id"`
-	Resources   []Resource `json:"resources"`
-	Drift       []Resource `json:"drift"`
-	Outputs     []Resource `json:"outputs"`
-	Findings    []Finding  `json:"findings"`
-	Coverage    []Coverage `json:"coverage"`
+	Resources   []Resource `json:"resources" nullable:"false"`
+	Drift       []Resource `json:"drift" nullable:"false"`
+	Outputs     []Resource `json:"outputs" nullable:"false"`
+	Findings    []Finding  `json:"findings" nullable:"false"`
+	Coverage    []Coverage `json:"coverage" nullable:"false"`
 	Summary     Summary    `json:"summary"`
-	Notices     []string   `json:"notices"`
+	Notices     []string   `json:"notices" nullable:"false"`
 }
 
 // ResourceIDs and OutputIDs must be supplied by the caller's opaque identity
