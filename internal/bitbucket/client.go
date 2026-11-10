@@ -23,6 +23,11 @@ import (
 
 var ErrRemote = errors.New("source service unavailable or returned unsupported facts")
 
+// ErrContextChanged carries validated authoritative facts for invalidation only.
+// Callers must still reject work/approval; a non-nil error never authorizes a
+// fork, a replacement repository, or a changed destination repository.
+var ErrContextChanged = errors.New("source repository context changed")
+
 type RemoteError struct {
 	Status     int
 	RetryAfter time.Duration
@@ -117,7 +122,7 @@ func (c *Client) Read(ctx context.Context, repo, externalID, branch string, pr i
 		if e = c.request(ctx, "GET", p, token, nil, &identity); e != nil {
 			return f, e
 		}
-		if identity.UUID != externalID {
+		if identity.UUID == "" || len(identity.UUID) > 256 {
 			return f, ErrRemote
 		}
 		var b struct {
@@ -133,7 +138,11 @@ func (c *Client) Read(ctx context.Context, repo, externalID, branch string, pr i
 		if b.Name != branch || !source.Commit(b.Target.Hash) {
 			return f, ErrRemote
 		}
-		return Facts{externalID, externalID, b.Target.Hash, branch, branch, "OPEN", 0}, nil
+		f = Facts{identity.UUID, identity.UUID, b.Target.Hash, branch, branch, "OPEN", 0}
+		if identity.UUID != externalID {
+			return f, ErrContextChanged
+		}
+		return f, nil
 	}
 	if pr < 1 {
 		return f, ErrRemote
@@ -164,12 +173,16 @@ func (c *Client) Read(ctx context.Context, repo, externalID, branch string, pr i
 	if e != nil {
 		return f, e
 	}
-	if b.Source.Repository.UUID != externalID || b.Destination.Repository.UUID != externalID || !catalog.Branch(b.Destination.Branch.Name) || !source.Commit(b.Source.Commit.Hash) || !catalog.Branch(b.Source.Branch.Name) || (b.State != "OPEN" && b.State != "MERGED" && b.State != "DECLINED" && b.State != "SUPERSEDED") {
+	if b.Source.Repository.UUID == "" || len(b.Source.Repository.UUID) > 256 || b.Destination.Repository.UUID == "" || len(b.Destination.Repository.UUID) > 256 || !catalog.Branch(b.Destination.Branch.Name) || !source.Commit(b.Source.Commit.Hash) || !catalog.Branch(b.Source.Branch.Name) || (b.State != "OPEN" && b.State != "MERGED" && b.State != "DECLINED" && b.State != "SUPERSEDED") {
 		return f, ErrRemote
 	}
 	// Eligibility is checked only after these authenticated facts invalidate any
 	// previous PR authority, including when its destination no longer matches.
-	return Facts{externalID, externalID, b.Source.Commit.Hash, b.Source.Branch.Name, b.Destination.Branch.Name, b.State, 0}, nil
+	f = Facts{b.Destination.Repository.UUID, b.Source.Repository.UUID, b.Source.Commit.Hash, b.Source.Branch.Name, b.Destination.Branch.Name, b.State, 0}
+	if f.RepositoryID != externalID || f.SourceRepositoryID != externalID {
+		return f, ErrContextChanged
+	}
+	return f, nil
 }
 func fmtInt(n int) string { b, _ := json.Marshal(n); return string(b) }
 func (c *Client) Manifest(ctx context.Context, repo, commit, token string) ([]byte, error) {

@@ -125,7 +125,8 @@ func (a *Server) registerSourceActions(api huma.API) {
 			return nil, fail(ctx, e)
 		}
 		facts, e := a.Bitbucket.Read(ctx, r.URL, r.ExternalID, r.Branch, 0, token)
-		if e != nil {
+		contextChanged := errors.Is(e, bitbucket.ErrContextChanged)
+		if e != nil && !contextChanged {
 			return nil, fail(ctx, e)
 		}
 		facts.InventoryRevision = r.Revision
@@ -135,6 +136,9 @@ func (a *Server) registerSourceActions(api huma.API) {
 		factsRevision, e := a.acceptSourceFacts(ctx, in.Org, in.ID, r, observation, facts)
 		if e != nil {
 			return nil, fail(ctx, e)
+		}
+		if contextChanged {
+			return nil, problem(ctx, 409, "The repository source context changed and is unsupported. Review its connection before requesting work.")
 		}
 		raw, e := a.Bitbucket.Manifest(ctx, r.URL, facts.Commit, token)
 		if e != nil {
@@ -217,13 +221,17 @@ func (a *Server) registerSourceActions(api huma.API) {
 			return nil, fail(ctx, e)
 		}
 		facts, e := a.Bitbucket.Read(ctx, r.URL, r.ExternalID, r.Branch, in.Body.Source.PR, token)
-		if e != nil {
+		contextChanged := errors.Is(e, bitbucket.ErrContextChanged)
+		if e != nil && !contextChanged {
 			return nil, fail(ctx, e)
 		}
 		facts.InventoryRevision = r.Revision
 		factsRevision, e := a.acceptSourceFacts(ctx, in.Org, repo, r, observation, facts)
 		if e != nil {
 			return nil, fail(ctx, e)
+		}
+		if contextChanged {
+			return nil, problem(ctx, 409, "The repository source context changed and is unsupported. Review its connection before requesting work.")
 		}
 		if in.Body.Source.Kind == "branch" && facts.Commit != r.Inventory {
 			return nil, problem(ctx, 409, "Sync the verified tracked inventory before requesting its preflight.")

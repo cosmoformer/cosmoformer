@@ -184,8 +184,9 @@ func TestWorkspaceUnavailableExactEvidenceAndIORevocation(t *testing.T) {
 			f.storage.mu.Unlock()
 			if scenario != "revoked" {
 				current := f.admin.call("GET", "/organizations/"+f.org+"/runs/"+f.assignment.RunID, nil, 200)
-				if current["run"].(map[string]any)["plan"].(map[string]any)["status"] != "ready" {
-					t.Fatal("read changed plan usability")
+				plan := current["run"].(map[string]any)["plan"].(map[string]any)
+				if plan["status"] != "invalidated" || plan["reason"] != "EVIDENCE_UNAVAILABLE" || plan["evidence_status"] != "unavailable" || plan["manifest_digest"] != p["manifest_digest"] {
+					t.Fatal("invalid exact evidence retained eligibility or changed identity", plan)
 				}
 			}
 		})

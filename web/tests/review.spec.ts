@@ -1,3 +1,4 @@
+import { approvalSummary } from './fixtures/review';
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { changes, changesResponse, reviewSession, projects, stackFixture, runFixture, runResponse, org, project, env, stack, run, attempt, plan, reviewID } from './fixtures/review';
@@ -17,6 +18,7 @@ async function synthetic(page: Page) {
         }
         if (path.endsWith('/projects')) return send(model.projects);
         if (model.revoked) return send({ code: 'FORBIDDEN', message: 'Current review access was revoked.' }, 403);
+        if (path.endsWith('/approvals')) return send(approvalSummary);
         if (path.endsWith('/stacks')) return send({ stacks: model.stacks });
         if (path.endsWith('/runs')) return send({ runs: [model.run.run] });
         if (path.endsWith('/changes')) return model.changesStatus === 200 ? send(model.changes) : send({ code: 'CONFLICT', message: 'Retained Changes are unavailable.' }, model.changesStatus);

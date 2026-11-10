@@ -191,7 +191,10 @@ func (a *Server) registerConfiguration(api huma.API) {
 		if len(plain) == 0 || len(plain) > 16384 || strings.ContainsRune(string(plain), 0) {
 			return nil, problem(ctx, 422, "Secret must be nonempty text of at most 16 KiB without NUL.")
 		}
-		newSemantic := semantic + 1
+		newSemantic := semantic
+		if in.Body.Value != nil {
+			newSemantic++
+		}
 		sealed, e := a.sealRevision(ctx, in.Org, in.ID, "managed_secret", newSemantic, plain)
 		if e != nil {
 			return nil, fail(ctx, e)
@@ -203,9 +206,6 @@ func (a *Server) registerConfiguration(api huma.API) {
 			}
 			if tag.RowsAffected() != 1 {
 				return nil, store.ErrConflict
-			}
-			if _, e = tx.Exec(ctx, `UPDATE cosmoformer.plans SET status='invalidated',invalidation_reason='SECRET_CHANGED',revision=revision+1 WHERE status='ready'`); e != nil {
-				return nil, e
 			}
 			return ok(), store.Audit(ctx, tx, in.Org, actor.ID, "secret.replace", in.ID)
 		})
@@ -219,9 +219,6 @@ func (a *Server) registerConfiguration(api huma.API) {
 				}
 				if tag.RowsAffected() != 1 {
 					return nil, store.ErrConflict
-				}
-				if _, e = tx.Exec(ctx, `UPDATE cosmoformer.plans SET status='invalidated',invalidation_reason='CONFIGURATION_CHANGED',revision=revision+1 WHERE status='ready'`); e != nil {
-					return nil, e
 				}
 				return ok(), store.Audit(ctx, tx, in.Org, actor.ID, resource.Path+".update", in.ID)
 			})

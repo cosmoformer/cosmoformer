@@ -89,3 +89,23 @@ func TestSignatureUsesOriginalBytes(t *testing.T) {
 		t.Fatal("invalid signature accepted")
 	}
 }
+
+func TestChangedRepositoryFactsAreReturnedOnlyWithDenial(t *testing.T) {
+	for _, pr := range []int{0, 1} {
+		t.Run(fmtInt(pr), func(t *testing.T) {
+			c := New(&http.Client{Transport: transport(func(r *http.Request) (*http.Response, error) {
+				if strings.Contains(r.URL.Path, "pullrequests") {
+					return response(r, `{"state":"OPEN","source":{"repository":{"uuid":"{fork}"},"commit":{"hash":"`+strings.Repeat("a", 40)+`"},"branch":{"name":"change"}},"destination":{"repository":{"uuid":"{main}"},"branch":{"name":"main"}}}`), nil
+				}
+				if strings.Contains(r.URL.Path, "refs/branches") {
+					return response(r, `{"name":"main","target":{"hash":"`+strings.Repeat("a", 40)+`"}}`), nil
+				}
+				return response(r, `{"uuid":"{replacement}"}`), nil
+			})})
+			facts, e := c.Read(context.Background(), "https://bitbucket.org/fictional/repo.git", "{main}", "main", pr, "")
+			if e != ErrContextChanged || facts.Commit != strings.Repeat("a", 40) || pr == 0 && facts.RepositoryID != "{replacement}" || pr == 1 && facts.SourceRepositoryID != "{fork}" {
+				t.Fatal("unsupported context was permitted or authoritative facts lost", facts, e)
+			}
+		})
+	}
+}

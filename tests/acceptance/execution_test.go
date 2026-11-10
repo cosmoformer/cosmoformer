@@ -42,9 +42,13 @@ func newExecutionFixture(t *testing.T) *executionFixture {
 func newExecutionFixtureForSource(t *testing.T, source map[string]any) *executionFixture {
 	return newExecutionFixtureForSourceProfile(t, source, false)
 }
-func newExecutionFixtureForSourceProfile(t *testing.T, source map[string]any, review bool) *executionFixture {
+func newExecutionFixtureForSourceProfile(t *testing.T, source map[string]any, review bool, minimum ...int) *executionFixture {
 	t.Helper()
-	f := newPreflightFixtureForSource(t, syntheticNativeEvidence{}, source)
+	var ticks *testClock
+	if len(minimum) > 0 {
+		ticks = &testClock{tick: time.Second, start: time.Now()}
+	}
+	f := newPreflightFixtureForSourceClock(t, syntheticNativeEvidence{}, source, ticks)
 	ctx := context.Background()
 	if e := f.agent.Admit(ctx); e != nil {
 		t.Fatal(e)
@@ -67,6 +71,15 @@ func newExecutionFixtureForSourceProfile(t *testing.T, source map[string]any, re
 	var project string
 	if e := f.db.Owner.QueryRow(ctx, `SELECT project_id::text FROM cosmoformer.stacks WHERE id=$1`, f.stack).Scan(&project); e != nil {
 		t.Fatal(e)
+	}
+	floor := 1
+	if len(minimum) > 0 {
+		floor = minimum[0]
+		p.Review.Minimum = max(p.Review.Minimum, floor)
+		if len(minimum) > 1 {
+			p.Review.Minimum = max(p.Review.Minimum, minimum[1])
+		}
+		f.exec(t, `UPDATE cosmoformer.projects SET minimum_approvals=$2,revision=revision+1 WHERE id=$1`, project, floor)
 	}
 	secretValue := `{"credential":"synthetic-native-value-74","number":92713,"flag":true}`
 	secret := id(f.admin.call("POST", "/organizations/"+f.org+"/secrets", map[string]any{"project_id": project, "name": "native input", "value": secretValue}, 200))
@@ -121,7 +134,7 @@ func newExecutionFixtureForSourceProfile(t *testing.T, source map[string]any, re
 	b := spec.Backend
 	nativeSource := []byte("variable \"credential\" {\n type=any\n sensitive=true\n}\n")
 	nativeSourceHash := sha256.Sum256(nativeSource)
-	reviewed := runs.ReviewedInputs{Version: 1, Stack: f.stack, StackRevision: spec.StackRevisionID, Subject: spec.Source.SubjectID, Facts: spec.Source.FactsRevision, Commit: spec.Source.Commit, Engine: runs.ManifestEngine{Name: spec.Engine.Name, Version: spec.Engine.Version, Arch: spec.Engine.Arch, Image: spec.Engine.ImageDigest, Git: "1:2.47.3-0+deb13u1"}, Backend: runs.ManifestBackend{Partition: b.Target.Partition, Bucket: b.Target.Bucket, Key: b.Target.Key, Region: b.Region, Owner: b.ExpectedOwner, Workspace: spec.Workspace, Profile: b.Profile, Table: b.TableARN, AttributesDigest: runs.Digest(b.Attributes)}, AWS: runs.ManifestAWS{ID: spec.AWS.ID, Revision: spec.AWS.Revision, Role: spec.AWS.RoleARN}, Pool: spec.Pool, Files: []runs.ManifestFile{{Repository: spec.Source.RepositoryID, Commit: spec.Source.Commit, Path: "main.tf", Kind: "regular", Size: int64(len(nativeSource)), Hash: hex.EncodeToString(nativeSourceHash[:])}}, Modules: []runs.ManifestModule{}, VarFiles: []runs.ManifestInputFile{}, BackendFiles: []runs.ManifestInputFile{}, Secrets: spec.Secrets, Grants: spec.Grants, Approval: runs.ApprovalPolicy{Floor: 1, Requested: 1, Minimum: 1, Revision: spec.Review.Revision}, AllowPR: spec.Review.AllowPRApply, Credentials: spec.SourceCredentials, Rules: spec.RuleVersion, Profile: spec.ProfileID, Epoch: 0, Provenance: runs.Provenance{Kind: "normal"}}
+	reviewed := runs.ReviewedInputs{Version: 1, Stack: f.stack, StackRevision: spec.StackRevisionID, Subject: spec.Source.SubjectID, Facts: spec.Source.FactsRevision, Commit: spec.Source.Commit, Engine: runs.ManifestEngine{Name: spec.Engine.Name, Version: spec.Engine.Version, Arch: spec.Engine.Arch, Image: spec.Engine.ImageDigest, Git: "1:2.47.3-0+deb13u1"}, Backend: runs.ManifestBackend{Partition: b.Target.Partition, Bucket: b.Target.Bucket, Key: b.Target.Key, Region: b.Region, Owner: b.ExpectedOwner, Workspace: spec.Workspace, Profile: b.Profile, Table: b.TableARN, AttributesDigest: runs.Digest(b.Attributes)}, AWS: runs.ManifestAWS{ID: spec.AWS.ID, Revision: spec.AWS.Revision, Role: spec.AWS.RoleARN}, Pool: spec.Pool, Files: []runs.ManifestFile{{Repository: spec.Source.RepositoryID, Commit: spec.Source.Commit, Path: "main.tf", Kind: "regular", Size: int64(len(nativeSource)), Hash: hex.EncodeToString(nativeSourceHash[:])}}, Modules: []runs.ManifestModule{}, VarFiles: []runs.ManifestInputFile{}, BackendFiles: []runs.ManifestInputFile{}, Secrets: spec.Secrets, Grants: spec.Grants, Approval: runs.ApprovalPolicy{Floor: floor, Requested: p.Review.Minimum, Minimum: p.Review.Minimum, Revision: spec.Review.Revision}, AllowPR: spec.Review.AllowPRApply, Credentials: spec.SourceCredentials, Rules: spec.RuleVersion, Profile: spec.ProfileID, Epoch: 0, Provenance: runs.Provenance{Kind: "normal"}}
 	pre := runs.PreInitSpec{ReviewedInputs: reviewed, Kind: "plan", SpecDigest: a.Digest, LockOrigin: "absent"}
 	return &executionFixture{preflightFixture: f, assignment: a, pre: pre, seq: 1, secret: secretValue}
 }

@@ -144,29 +144,25 @@ func TestExecutionResultRequiresExactAccountingAndFinalLogFacts(t *testing.T) {
 	}
 }
 func TestExecutionCurrentMetadataChangesRevokeLaunchAuthority(t *testing.T) {
-	f := newExecutionFixture(t)
-	f.prepare(t)
-	request := f.request(t, 1, "init", "")
-	var project string
-	if e := f.db.Owner.QueryRow(context.Background(), `SELECT project_id::text FROM cosmoformer.stacks WHERE id=$1`, f.stack).Scan(&project); e != nil {
-		t.Fatal(e)
-	}
-	for name, c := range map[string]struct {
-		set, restore string
-		args         []any
-		code         string
-	}{
-		"project revision": {`UPDATE cosmoformer.projects SET revision=revision+1 WHERE id=$1`, `UPDATE cosmoformer.projects SET revision=revision-1 WHERE id=$1`, []any{project}, "INPUTS_CHANGED"},
-		"source facts":     {`UPDATE cosmoformer.source_subjects SET facts_revision=facts_revision+1 WHERE id=$1`, `UPDATE cosmoformer.source_subjects SET facts_revision=facts_revision-1 WHERE id=$1`, []any{f.assignment.Source.SubjectID}, "SOURCE_CHANGED"},
-		"AWS metadata":     {`UPDATE cosmoformer.aws_connections SET expected_bootstrap_principal='arn:aws:iam::111122223333:role/other' WHERE id=$1`, `UPDATE cosmoformer.aws_connections SET expected_bootstrap_principal=$2 WHERE id=$1`, []any{f.assignment.Execution.AWS.ID, f.assignment.Execution.AWS.Bootstrap}, "INPUTS_CHANGED"},
-		"repository URL":   {`UPDATE cosmoformer.repositories SET url='https://bitbucket.org/fictional/changed.git' WHERE id=$1`, `UPDATE cosmoformer.repositories SET url=$2 WHERE id=$1`, []any{f.assignment.Source.RepositoryID, f.assignment.Source.URL}, "INPUTS_CHANGED"},
-	} {
+	for _, name := range []string{"approval policy", "source facts", "AWS metadata", "repository URL"} {
 		t.Run(name, func(t *testing.T) {
-			setArgs := c.args[:1]
-			f.exec(t, c.set, setArgs...)
-			rejectExecution(t, f, "start-permission", request, c.code)
-			f.exec(t, c.restore, c.args...)
+			f := newExecutionFixture(t)
+			f.prepare(t)
+			request := f.request(t, 1, "init", "")
+			code := "INPUTS_CHANGED"
+			switch name {
+			case "approval policy":
+				f.exec(t, `UPDATE cosmoformer.projects SET minimum_approvals=2,revision=revision+1 WHERE id=(SELECT project_id FROM cosmoformer.stacks WHERE id=$1)`, f.stack)
+			case "source facts":
+				f.exec(t, `UPDATE cosmoformer.source_subjects SET facts_revision=facts_revision+1 WHERE id=$1`, f.assignment.Source.SubjectID)
+				code = "SOURCE_CHANGED"
+			case "AWS metadata":
+				f.exec(t, `UPDATE cosmoformer.aws_connections SET expected_bootstrap_principal='arn:aws:iam::111122223333:role/other' WHERE id=$1`, f.assignment.Execution.AWS.ID)
+			case "repository URL":
+				f.exec(t, `UPDATE cosmoformer.repositories SET url='https://bitbucket.org/fictional/changed.git' WHERE id=$1`, f.assignment.Source.RepositoryID)
+			}
+			rejectExecution(t, f, "start-permission", request, code)
+			f.retained(t)
 		})
 	}
-	f.transition(t, "start-permission", request, 200)
 }

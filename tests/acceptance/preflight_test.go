@@ -30,22 +30,28 @@ import (
 )
 
 type testClock struct {
-	mu   sync.Mutex
-	tick time.Duration
+	mu    sync.Mutex
+	tick  time.Duration
+	start time.Time
 }
 
 func (c *testClock) Now() (time.Duration, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if !c.start.IsZero() {
+		return c.tick + time.Since(c.start), nil
+	}
 	return c.tick, nil
 }
 
 type sourceTransport struct {
-	manifest      []byte
-	commit        string
-	prDestination string
-	prState       string
-	mu            sync.Mutex
+	manifest                []byte
+	commit                  string
+	prDestination           string
+	prState                 string
+	prSourceRepository      string
+	prDestinationRepository string
+	mu                      sync.Mutex
 }
 
 func (s *sourceTransport) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -70,7 +76,14 @@ func (s *sourceTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 		if state == "" {
 			state = "OPEN"
 		}
-		body = []byte(`{"state":"` + state + `","source":{"repository":{"uuid":"{fictional-repository}"},"commit":{"hash":"` + s.commit + `"},"branch":{"name":"change"}},"destination":{"repository":{"uuid":"{fictional-repository}"},"branch":{"name":"` + destination + `"}}}`)
+		sourceRepo, destinationRepo := s.prSourceRepository, s.prDestinationRepository
+		if sourceRepo == "" {
+			sourceRepo = "{fictional-repository}"
+		}
+		if destinationRepo == "" {
+			destinationRepo = "{fictional-repository}"
+		}
+		body = []byte(`{"state":"` + state + `","source":{"repository":{"uuid":"` + sourceRepo + `"},"commit":{"hash":"` + s.commit + `"},"branch":{"name":"change"}},"destination":{"repository":{"uuid":"` + destinationRepo + `"},"branch":{"name":"` + destination + `"}}}`)
 	}
 	return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body)), Request: r}, nil
 }
@@ -115,7 +128,13 @@ func newPreflightFixtureWithNative(t *testing.T, native coordinator.NativeEviden
 }
 func newPreflightFixtureForSource(t *testing.T, native coordinator.NativeEvidenceVerifier, source map[string]any, requiredTags ...[]string) *preflightFixture {
 	t.Helper()
-	ticks := &testClock{tick: time.Second}
+	return newPreflightFixtureForSourceClock(t, native, source, nil, requiredTags...)
+}
+func newPreflightFixtureForSourceClock(t *testing.T, native coordinator.NativeEvidenceVerifier, source map[string]any, ticks *testClock, requiredTags ...[]string) *preflightFixture {
+	t.Helper()
+	if ticks == nil {
+		ticks = &testClock{tick: time.Second}
+	}
 	remote := &sourceTransport{commit: strings.Repeat("a", 40)}
 	cipher, e := cryptostore.New(bytes.Repeat([]byte{42}, 32))
 	if e != nil {

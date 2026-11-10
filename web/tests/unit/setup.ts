@@ -13,6 +13,8 @@ expect.extend(domMatchers);
 
 beforeEach(() => {
     setCSRF(null);
+    if (typeof HTMLDialogElement !== 'undefined') Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function (this: HTMLDialogElement) { this.setAttribute('open', ''); } });
+    if (typeof HTMLDialogElement !== 'undefined') Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function (this: HTMLDialogElement) { this.removeAttribute('open'); } });
     vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('Unexpected test request'))));
 });
 afterEach(() => {

@@ -19,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cosmoformer/cosmoformer/internal/bitbucket"
+	"github.com/cosmoformer/cosmoformer/internal/cryptostore"
 	"github.com/cosmoformer/cosmoformer/internal/evidence"
 	"github.com/cosmoformer/cosmoformer/internal/httpapi"
 	"github.com/cosmoformer/cosmoformer/internal/identity"
@@ -296,8 +298,9 @@ func TestBrowserServer(t *testing.T) {
 	}
 	t.Cleanup(func() { os.RemoveAll(short) })
 	t.Setenv("TMPDIR", short)
-	f := newExecutionFixtureForSourceProfile(t, map[string]any{"kind": "branch"}, true)
+	f := newExecutionFixtureForSourceProfile(t, map[string]any{"kind": "branch"}, true, 1)
 	review := finishReviewFixture(t, f, false)
+	f.exec(t, `INSERT INTO cosmoformer.grants(org_id,team_id,project_id,environment_id,role) SELECT org_id,team_id,project_id,environment_id,'approver' FROM cosmoformer.grants WHERE role='planner' LIMIT 1`)
 	db := f.db
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -316,7 +319,8 @@ func TestBrowserServer(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer os.Remove(file)
-	handler, _ := httpapi.NewWithOptions(db.App, "https://localhost:5174", httpapi.Options{Evidence: &evidence.Custody{Storage: f.storage, Bucket: "synthetic"}, Clock: f.ticks})
+	cipher, _ := cryptostore.New(bytes.Repeat([]byte{42}, 32))
+	handler, _ := httpapi.NewWithOptions(db.App, "https://localhost:5174", httpapi.Options{Evidence: &evidence.Custody{Storage: f.storage, Bucket: "synthetic"}, Clock: &approvalClock{start: time.Now()}, Cipher: cipher, Bitbucket: bitbucket.New(&http.Client{Transport: f.remote})})
 	server := &http.Server{Addr: "127.0.0.1:18081", Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	done := make(chan error, 1)
 	go func() { done <- server.ListenAndServe() }()

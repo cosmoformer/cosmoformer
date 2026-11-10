@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -95,13 +96,13 @@ func (a *Server) workerSourceObservation(ctx context.Context, org, subject strin
 		return bitbucket.Facts{}, e
 	}
 	f, e := a.Bitbucket.Read(ctx, r.URL, r.ExternalID, r.Branch, pr, token)
-	if e != nil {
+	if e != nil && !errors.Is(e, bitbucket.ErrContextChanged) {
 		return f, e
 	}
 	f.InventoryRevision = revision
 	// Return authoritative ineligible facts too. Acceptance must advance the
 	// source revision before the immutable assignment's eligibility is checked.
-	return f, nil
+	return f, e
 }
 
 func (a *Server) currentExecutionSecrets(ctx context.Context, tx pgx.Tx, org string, s runs.ExecutionSpec) ([]runs.EnvSecret, error) {

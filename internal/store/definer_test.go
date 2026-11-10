@@ -89,7 +89,17 @@ func TestDefinerNamespaceReadiness(t *testing.T) {
 func TestVersionEightDefinerUpgrade(t *testing.T) {
 	db, c, fingerprint := quotaConnection(t)
 	// Restore the exact version-8 function setting without rewriting migrations.
-	sqlOK(t, db.Owner, `DO $$ DECLARE f regprocedure; BEGIN
+	sqlOK(t, db.Owner, `
+ DROP FUNCTION cosmoformer.approval_policy_revision() CASCADE;
+ ALTER TABLE cosmoformer.projects DROP COLUMN approval_policy_revision;
+ DROP FUNCTION cosmoformer.approval_event_integrity() CASCADE;
+ ALTER TABLE cosmoformer.approvals DROP COLUMN manifest_digest, DROP COLUMN source_commit;
+ DROP FUNCTION cosmoformer.plan_vote_integrity() CASCADE;
+ DROP FUNCTION cosmoformer.invalidate_reviewed_input() CASCADE;
+ DROP FUNCTION cosmoformer.invalidate_runtime_plans() CASCADE;
+ DROP FUNCTION cosmoformer.release_invalid_plan_holds() CASCADE;
+ DROP FUNCTION cosmoformer.invalidate_epoch_plans() CASCADE;
+ DO $$ DECLARE f regprocedure; BEGIN
  FOR f IN SELECT p.oid::regprocedure FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='cosmoformer' AND p.prosecdef LOOP
  EXECUTE format('ALTER FUNCTION %s SET search_path=pg_catalog,cosmoformer',f);
  END LOOP; END $$;
@@ -102,7 +112,7 @@ func TestVersionEightDefinerUpgrade(t *testing.T) {
 	snapshot := func() string {
 		t.Helper()
 		var value string
-		if err := db.Owner.QueryRow(context.Background(), `SELECT jsonb_agg(jsonb_build_array(p.oid,p.proowner,p.proacl,p.prosrc) ORDER BY p.oid)::text FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='cosmoformer' AND p.prosecdef`).Scan(&value); err != nil {
+		if err := db.Owner.QueryRow(context.Background(), `SELECT jsonb_agg(jsonb_build_array(p.oid,p.proowner,p.proacl,p.prosrc) ORDER BY p.oid)::text FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='cosmoformer' AND p.prosecdef AND p.proname NOT IN ('invalidate_runtime_plans','invalidate_epoch_plans')`).Scan(&value); err != nil {
 			t.Fatal(err)
 		}
 		return value

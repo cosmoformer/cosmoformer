@@ -54,7 +54,7 @@ func (c *Coordinator) executionAuthority(ctx context.Context, tx pgx.Tx, a runs.
 	var project, env, requester, automation, kind string
 	var floor int
 	var revision int64
-	e := tx.QueryRow(ctx, `SELECT st.project_id::text,st.environment_id::text,coalesce(o.requester_id::text,''),coalesce(o.automation_repository_id::text,''),o.kind,p.minimum_approvals,p.revision FROM cosmoformer.operations o JOIN cosmoformer.stacks st ON st.id=o.stack_id JOIN cosmoformer.projects p ON p.id=st.project_id JOIN cosmoformer.environments env ON env.id=st.environment_id WHERE o.id=$1 AND NOT p.archived AND NOT env.archived AND EXISTS(SELECT FROM cosmoformer.runs r WHERE r.id=o.run_id AND r.source_subject_id=$2 AND r.source_commit=$3 AND r.source_facts_revision=$4)`, a.OperationID, s.Source.SubjectID, s.Source.Commit, s.Source.FactsRevision).Scan(&project, &env, &requester, &automation, &kind, &floor, &revision)
+	e := tx.QueryRow(ctx, `SELECT st.project_id::text,st.environment_id::text,coalesce(o.requester_id::text,''),coalesce(o.automation_repository_id::text,''),o.kind,p.minimum_approvals,p.approval_policy_revision FROM cosmoformer.operations o JOIN cosmoformer.stacks st ON st.id=o.stack_id JOIN cosmoformer.projects p ON p.id=st.project_id JOIN cosmoformer.environments env ON env.id=st.environment_id WHERE o.id=$1 AND NOT p.archived AND NOT env.archived AND EXISTS(SELECT FROM cosmoformer.runs r WHERE r.id=o.run_id AND r.source_subject_id=$2 AND r.source_commit=$3 AND r.source_facts_revision=$4)`, a.OperationID, s.Source.SubjectID, s.Source.Commit, s.Source.FactsRevision).Scan(&project, &env, &requester, &automation, &kind, &floor, &revision)
 	if e != nil {
 		return runs.Fail("INPUTS_CHANGED")
 	}
@@ -574,7 +574,8 @@ func (c *Coordinator) executionTransition(ctx context.Context, token, route stri
 				return nil, e
 			}
 			facts, e = c.ObserveSource(ctx, org, observation.SubjectID)
-			if e != nil {
+			contextChanged := errors.Is(e, bitbucket.ErrContextChanged)
+			if e != nil && !contextChanged {
 				return nil, runs.Fail("SOURCE_UNAVAILABLE")
 			}
 			// Commit authoritative changed facts even if this permission is rejected.
@@ -587,6 +588,9 @@ func (c *Coordinator) executionTransition(ctx context.Context, token, route stri
 			})
 			if e != nil {
 				return nil, e
+			}
+			if contextChanged {
+				return nil, runs.Fail("SOURCE_CHANGED")
 			}
 		}
 	}
@@ -963,7 +967,7 @@ func ResolveExecutionSpec(ctx context.Context, tx pgx.Tx, p runs.PreflightSpec, 
 	if e != nil {
 		return s, runs.Fail("AWS_EXECUTION_METADATA_REQUIRED")
 	}
-	e = tx.QueryRow(ctx, `SELECT p.revision FROM cosmoformer.projects p JOIN cosmoformer.stacks st ON st.project_id=p.id WHERE st.effective_revision_id=$1`, p.StackRevisionID).Scan(&s.Review.Revision)
+	e = tx.QueryRow(ctx, `SELECT p.approval_policy_revision FROM cosmoformer.projects p JOIN cosmoformer.stacks st ON st.project_id=p.id WHERE st.effective_revision_id=$1`, p.StackRevisionID).Scan(&s.Review.Revision)
 	if e != nil {
 		return s, e
 	}
