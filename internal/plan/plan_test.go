@@ -771,3 +771,146 @@ func TestRetainedDataSourcesDoNotReceiveManagedRules(t *testing.T) {
 		}
 	}
 }
+
+func TestRetainedCoverageCannotClaimUnsupportedVariantIsSupported(t *testing.T) {
+	for _, f := range loadFixtures(t) {
+		if f.Variant != "aws_default_route_table" {
+			continue
+		}
+		expected, err := analyze(f.Plan, fixtureOptions(t, f.Plan), fixtureSchema(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if expected.Coverage[0].Status != "partial" {
+			t.Fatal("fixture must independently have partial coverage")
+		}
+		raw, _ := json.Marshal(expected)
+		var actual Result
+		if json.Unmarshal(raw, &actual) != nil {
+			t.Fatal("decode")
+		}
+		actual.Coverage[0].Status = "supported"
+		actual.Coverage[0].Variants = []string{}
+		if VerifySanitized(expected, &actual) == nil {
+			t.Fatal("forged complete coverage accepted")
+		}
+		return
+	}
+	t.Fatal("unsupported default-route-table fixture missing")
+}
+
+func TestRetainedCoverageIsDerivedFromVerifiedIdentitiesAndSafeValues(t *testing.T) {
+	for _, f := range loadFixtures(t) {
+		if f.Error {
+			continue
+		}
+		t.Run(f.Name, func(t *testing.T) {
+			o := fixtureOptions(t, f.Plan)
+			expected, err := analyze(f.Plan, o, fixtureSchema(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			clone := func() *Result {
+				b, _ := json.Marshal(expected)
+				var v Result
+				if json.Unmarshal(b, &v) != nil {
+					t.Fatal("decode")
+				}
+				return &v
+			}
+			if VerifySanitized(expected, clone()) != nil {
+				t.Fatal("legitimate coverage rejected")
+			}
+			for _, mutate := range []func(*Result){
+				func(v *Result) { v.Coverage = nil },
+				func(v *Result) { v.Coverage[0].Status = "invented" },
+				func(v *Result) { v.Coverage[0].Variants = nil },
+				func(v *Result) { v.Coverage[0].UnknownHidden = nil },
+				func(v *Result) { v.Coverage[0].UnknownHidden = []string{outputID} },
+				func(v *Result) { v.Coverage[0].Schema = "forged" },
+			} {
+				v := clone()
+				mutate(v)
+				if VerifySanitized(expected, v) == nil {
+					t.Fatal("altered/omitted coverage accepted")
+				}
+			}
+			// The worker knows additional operational values which the platform
+			// does not. Reanalyzing with those masks must conservatively verify.
+			if len(expected.Resources) != 0 {
+				if err := o.Secrets.Register(expected.Resources[0].Type); err != nil {
+					t.Fatal(err)
+				}
+				masked, err := analyze(f.Plan, o, fixtureSchema(t))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if VerifySanitized(expected, masked) != nil {
+					t.Fatal("worker-only identifier masking rejected")
+				}
+			}
+		})
+	}
+	// Generic-only is schema identity, not an upgradeable status assertion.
+	f := loadFixtures(t)[0]
+	s := fixtureSchema(t)
+	s.semantic = map[string]bool{}
+	s.coverage[0].Status = "generic_only"
+	expected, err := analyze(f.Plan, fixtureOptions(t, f.Plan), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(expected)
+	var actual Result
+	_ = json.Unmarshal(b, &actual)
+	if VerifySanitized(expected, &actual) != nil {
+		t.Fatal("generic result rejected")
+	}
+	actual.Coverage[0].Status = "supported"
+	if VerifySanitized(expected, &actual) == nil {
+		t.Fatal("generic coverage upgraded")
+	}
+}
+
+func TestWorkerOnlyValueMaskAddsCoverageUncertainty(t *testing.T) {
+	f := loadFixtures(t)[0]
+	options := fixtureOptions(t, f.Plan)
+	expected, err := analyze(f.Plan, options, fixtureSchema(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = options.Secrets.Register("false"); err != nil {
+		t.Fatal(err)
+	}
+	masked, err := analyze(f.Plan, options, fixtureSchema(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if masked.Coverage[0].Status != "valid_with_unknown_hidden" || len(masked.Coverage[0].UnknownHidden) == 0 {
+		t.Fatal("worker mask did not register uncertainty")
+	}
+	if VerifySanitized(expected, masked) != nil {
+		t.Fatal("legitimate worker-only value masking rejected")
+	}
+	masked.Coverage[0].UnknownHidden = []string{}
+	if VerifySanitized(expected, masked) == nil {
+		t.Fatal("worker masking omitted its uncertainty")
+	}
+}
+func TestEmptyProviderCoverageStillMustBePresent(t *testing.T) {
+	raw := []byte(`{"format_version":"1.2","terraform_version":"1.13.8","planned_values":{},"configuration":{}}`)
+	expected, err := Analyze(raw, []byte(`{"format_version":"1.0"}`), fixtureOptions(t, raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(expected)
+	var actual Result
+	_ = json.Unmarshal(b, &actual)
+	if VerifySanitized(expected, &actual) != nil {
+		t.Fatal("empty provider result rejected")
+	}
+	actual.Coverage = nil
+	if VerifySanitized(expected, &actual) == nil {
+		t.Fatal("omitted provider coverage accepted")
+	}
+}

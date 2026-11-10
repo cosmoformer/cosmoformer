@@ -10,7 +10,7 @@ Readiness requires verified exact-version evidence, a sealed reviewed-input mani
 
 Schema version **10** adds immutable explicit planning intent and ready-plan identities while preserving migrations 001–009. The reference engines are OpenTofu **1.13.8** and Terraform **1.17.1**, Linux amd64. Exact AWS provider **6.41.0** schema profiles provide the selected warnings; other validated allowed-registry providers have generic coverage. Unsupported KMS execution remains blocked.
 
-There is no production release. Approvals, Apply, recovery clearance, Force Stop UI, scheduled cleanup, deployment packaging and the fuller Changes workspace remain unfinished. Synthetic PostgreSQL/worker tests and the separate network-isolated native matrices do not establish live AWS/IAM or company compatibility. See the [planning behavior and boundaries](docs/operator-guide.md#native-planning).
+There is no production release. Approvals, Apply, recovery clearance, Force Stop UI, scheduled cleanup and deployment packaging remain unfinished. Synthetic PostgreSQL/worker tests and the separate network-isolated native matrices do not establish live AWS/IAM or company compatibility. See the [planning behavior and boundaries](docs/operator-guide.md#native-planning).
 
 ## Local development
 
@@ -93,7 +93,15 @@ Milestone 5 adds `internal/plan` for strict native evidence validation, sanitize
 
 Selected AWS rules cover destructive actions, RDS protection/backup/public settings, security-group ingress, VPC routes and network ACL rules. Network findings describe potential settings changes, not proven reachability or business outages. Exact provider/schema profiles are checked offline with both pinned engines and AWS **6.41.0**. Other allowed external providers receive validated generic action/value rendering with explicit absent semantic coverage. Default route-table/default ACL variants receive no related-type semantic fallback.
 
-`internal/testdata/plans.json` contains 126 synthetic cases. `internal/testdata/compatibility.json` records native schema fingerprints and extracted resource shapes; synthetic plans alone do not establish compatibility. See the [analysis limits and integration boundary](docs/operator-guide.md#plan-analysis-library-and-coverage) before using the library. Native planning and readiness are connected through explicit requests; approvals, Apply, recovery clearance and the fuller Changes workspace remain unfinished. Company compatibility remains `not_assessed`.
+`internal/testdata/plans.json` contains 126 synthetic cases. `internal/testdata/compatibility.json` records native schema fingerprints and extracted resource shapes; synthetic plans alone do not establish compatibility. See the [analysis limits and integration boundary](docs/operator-guide.md#plan-analysis-library-and-coverage) before using the library. Native planning and readiness are connected through explicit requests; approvals, Apply and recovery clearance remain unfinished. Company compatibility remains `not_assessed`.
+
+## Plan-review workspace
+
+Open a project from Organizations, select an environment, and open a stack or an exact run. URLs retain organization/project/environment/stack context across refresh and deep links. Stack pages show current source; run pages preserve their own accepted source and commit/PR, purpose, plan/revision/manifest identity, profile and timestamps.
+
+Check source and Request plan are separate explicit actions. Accepted requests open their exact returned run. Ready plans are labelled **Ready for review**. Changes shows consequential findings, action counts, risk-ordered searchable resources, replacement order, lossless values, outputs and separate drift. Hidden/unknown values and partial/generic/unsupported coverage stay visible as limitations; absent warnings never prove safety. Retained finalized Changes can be reviewed after expiry/invalidation without restoring execution eligibility. Missing/corrupt exact evidence stays unavailable.
+
+Logs support follow/pause, bounded archive cursor continuation, preview resets and known/unknown gaps. The browser retains at most 512 Ki characters and 500 displayed segments; that display limit is separate from durable evidence loss. Polling does not renew idle sessions. Scope changes, logout/expiry and denied reads clear protected data, and sign-in never replays a planning mutation. Raw downloads remain explicit and separately authorized through the existing API. The workspace supports keyboard navigation, responsive layouts and light/dark themes.
 
 ## Checks
 

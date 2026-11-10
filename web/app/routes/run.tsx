@@ -1,0 +1,33 @@
+import { useCallback, useEffect, useState } from 'react';
+import { Link, useParams, useSearchParams } from 'react-router';
+import { ProjectContext, ReadState, time, Workspace } from '../components/workspace';
+import { useRead } from '../lib/polling';
+import { RunContext } from '../components/run-context';
+import { ChangeList } from '../components/change-list';
+import { LogView } from '../components/log-view';
+import type { Schema } from '../lib/api';
+export default function Run() { return <Workspace><ProjectContext>{c => <RunBody key={c.environment} {...c}/>}</ProjectContext></Workspace>; }
+function RunBody({ org, project, environment }: { org: string; project: string; environment: string }) {
+    const { run = '' } = useParams(), [search, setSearch] = useSearchParams();
+    const pages = new URLSearchParams();
+    for(const key of ['attempt_before','artifact_before']) {const value=search.get(key);if(value) pages.set(key,value);}
+    const read = useRead(`/organizations/${org}/runs/${run}${pages.size ? '?'+pages : ''}`, 'RunOutputBody', 5000);
+    const pageTo = (key: string, value: string) => { const p=new URLSearchParams(search);p.delete('attempt');if(value) p.set(key,value);else p.delete(key);setSearch(p); };
+    const [denied, setDenied] = useState(false), onDenied = useCallback(() => setDenied(true), []);
+    if (denied) return <section className="error"><h1>Review access changed</h1><p>Protected content has been cleared. Reopen this run to check current access.</p></section>;
+    if (!read.data) return <ReadState error={read.error} retry={read.reload}/>;
+    const r = read.data.run;
+    if (r.project_id !== project || environment && r.environment_id !== environment) return <section className="error"><h1>Run outside this context</h1><p>Open the run from its owning project and environment.</p></section>;
+    const view = ['changes', 'logs'].includes(search.get('view') ?? '') ? search.get('view')! : 'overview';
+    const attemptPages = <div className="actions">{read.data.attempts_next && <button onClick={()=>pageTo('attempt_before',read.data!.attempts_next!)}>Older attempts</button>}{search.get('attempt_before') && <button onClick={()=>pageTo('attempt_before','')}>Newest attempts</button>}</div>;
+    const attempt = search.get('attempt') ?? read.data.attempts.at(-1)?.id ?? '';
+    return <><RunContext org={org} run={r}/><nav className="view-nav" aria-label="Run views">{['overview', 'changes', 'logs'].map(v => <Link key={v} aria-current={view === v ? 'page' : undefined} to={`?${new URLSearchParams({ env: r.environment_id, view: v })}`}>{v === 'overview' ? 'Overview' : v === 'changes' ? 'Changes' : 'Logs'}</Link>)}</nav>{view === 'changes' ? r.plan?.ready_at ? <Changes key={`${r.plan.id}/${r.plan.revision}/${r.plan.manifest_digest}`} org={org} run={run} plan={r.plan} onDenied={onDenied}/> : <section className="empty-state"><h2>Changes unavailable</h2><p>{r.native_planning ? 'This native plan has no finalized review evidence. Inspect the execution outcome and logs.' : 'This run is a source check. Request a native plan from the stack to produce Changes.'}</p></section> : view === 'logs' ? <><label>Attempt<select value={attempt} onChange={e => { const p = new URLSearchParams(search); p.set('attempt', e.target.value); setSearch(p); }}>{read.data.attempts.map((a, i) => <option key={a.id} value={a.id}>{a.phase} · {a.outcome || a.state}</option>)}</select></label>{attemptPages}{read.data.attempts.some(a => a.id === attempt) ? <LogView key={attempt} org={org} run={run} attempt={attempt} onDenied={onDenied}/> : <p className="notice">No authorized attempt selected. Logs appear after a worker claims this request.</p>}</> : <><section className="panel"><h2>Execution & review</h2><dl className="outcome-grid"><div><dt>Execution outcome</dt><dd>{r.status}</dd></div><div><dt>Plan usability</dt><dd>{r.plan?.status ?? 'No native plan'}</dd></div><div><dt>Evidence availability</dt><dd>{r.plan?.evidence_status ?? 'No plan evidence'}</dd></div><div><dt>Queue priority</dt><dd>{r.priority}</dd></div></dl><p>Ready plans are available for review. Approval, Apply, Force Stop, and recovery clearance are not available in this workspace.</p></section><section className="panel"><h2>Attempts</h2>{!read.data.attempts.length && <p>Waiting for a worker claim.</p>}{read.data.attempts.map((a, i) => <div key={a.id} className="row"><div><strong>{a.phase} · {a.outcome || a.state}</strong><small>{time(a.created_at)} → {a.closed_at ? time(a.closed_at) : 'In progress'}</small><code>{a.id}</code></div><Link to={`?${new URLSearchParams({ env: r.environment_id, view: 'logs', attempt: a.id, ...(search.get('attempt_before') ? { attempt_before: search.get('attempt_before')! } : {}) })}`}>View logs</Link></div>)}{attemptPages}</section>{read.data.can_read_raw && <section className="panel"><h2>Raw evidence</h2><p>Raw evidence may contain secrets. Downloads require your separate current raw evidence permission.</p>{!read.data.raw_artifacts.length && <p>No retained raw artifacts.</p>}{read.data.raw_artifacts.map(a => <div className="row" key={a.id}><span>{a.kind.replaceAll('_', ' ')} · {a.status}</span>{a.status === 'finalized' && <a href={`/api/v1/organizations/${org}/artifacts/${a.id}/content`} download>Download {a.kind.replaceAll('_', ' ')}</a>}</div>)}{read.data.raw_artifacts_next && <button onClick={()=>pageTo('artifact_before',read.data!.raw_artifacts_next!)}>Older raw artifacts</button>}{search.get('artifact_before') && <button onClick={()=>pageTo('artifact_before','')}>Newest raw artifacts</button>}</section>}</>}</>;
+}
+function Changes({ org, run, plan, onDenied }: { org: string; run: string; plan: Schema['PlanStatus']; onDenied: () => void }) {
+    const query = new URLSearchParams({ plan_id: plan.id, revision: String(plan.revision), manifest_digest: plan.manifest_digest });
+    const read = useRead(`/organizations/${org}/runs/${run}/changes?${query}`, 'ChangesOutputBody', 10000);
+    useEffect(() => { if (read.denied) onDenied(); }, [read.denied, onDenied]);
+    if (!read.data) return <section aria-label="Changes evidence"><ReadState error={read.error} retry={read.reload}/>{read.error && <p>Exact retained Changes are unavailable. No raw or latest-version fallback is used. Request a fresh plan if evidence cannot be recovered.</p>}</section>;
+    if (read.data.plan_id !== plan.id || read.data.revision !== plan.revision || read.data.manifest_digest !== plan.manifest_digest || read.data.changes?.profile_id !== plan.profile_id) return <p role="alert" className="error">Review identity changed. Refresh this run before reviewing Changes.</p>;
+    return <ChangeList changes={read.data.changes}/>;
+}

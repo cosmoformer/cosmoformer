@@ -1,17 +1,20 @@
 import { useState, type FormEvent } from 'react';
-import { Navigate, Link, useNavigate } from 'react-router';
+import { Navigate, Link, useNavigate, useSearchParams } from 'react-router';
 import { Button } from '@astryxdesign/core/Button';
 import { api } from '../lib/api';
 import { useSession } from '../lib/session';
 export default function Login() {
     const { session, loading, refresh } = useSession(), navigate = useNavigate();
+    const [search] = useSearchParams();
+    const candidate = search.get('returnTo') ?? '';
+    const returnTo = /^\/o\/[0-9a-f-]{36}\/p\/[0-9a-f-]{36}(?:\/(?:stacks|runs)\/[0-9a-f-]{36})?(?:\?[^#]*)?$/.test(candidate) ? candidate : '/organizations';
     const [error, setError] = useState(''), [busy, setBusy] = useState(false);
     if (session)
-        return <Navigate to="/organizations" replace/>;
+        return <Navigate to={returnTo} replace/>;
     async function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const form = new FormData(event.currentTarget); setBusy(true); setError(''); try {
         await api('/session/login', 'LoginOutputBody', { method: 'POST', body: { username: form.get('username'), password: form.get('password') } });
         await refresh();
-        navigate('/organizations', { replace: true });
+        navigate(returnTo, { replace: true });
     }
     catch (e) {
         setError(e instanceof Error ? e.message : 'Unable to sign in.');

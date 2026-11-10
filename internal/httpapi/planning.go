@@ -28,16 +28,19 @@ type PlanStatus struct {
 	Revision    int64      `json:"revision"`
 	Manifest    string     `json:"manifest_digest"`
 	Profile     string     `json:"profile_id"`
+	Evidence    string     `json:"evidence_status" enum:"not_finalized,retained,unavailable"`
 }
 type PlansOutput struct {
 	Body struct {
-		Plans []PlanStatus `json:"plans"`
+		Plans []PlanStatus `json:"plans" nullable:"false"`
+		Next  string       `json:"next_cursor,omitempty"`
 	}
 }
 type ChangesInput struct {
 	OrgIDPath
 	Plan     string `query:"plan_id" format:"uuid" required:"true"`
 	Revision int64  `query:"revision" minimum:"1" required:"true"`
+	Manifest string `query:"manifest_digest" pattern:"^[0-9a-f]{64}$"`
 }
 type SanitizedChanges plan.Result
 
@@ -51,7 +54,7 @@ type ChangesOutput struct {
 }
 
 func (a *Server) registerPlanningReads(api huma.API) {
-	register(api, "GET", "/organizations/{org}/plans", "plans", func(ctx context.Context, in *OrgPath) (*PlansOutput, error) {
+	register(api, "GET", "/organizations/{org}/plans", "plans", func(ctx context.Context, in *WorkspaceListInput) (*PlansOutput, error) {
 		out := &PlansOutput{}
 		out.Body.Plans = []PlanStatus{}
 		e := a.tx(ctx, in.Org, func(tx pgx.Tx, actor store.Actor) error {
@@ -59,7 +62,7 @@ func (a *Server) registerPlanningReads(api huma.API) {
 			if e != nil {
 				return e
 			}
-			rows, e := tx.Query(ctx, `SELECT p.id::text,o.run_id::text,p.operation_id::text,p.attempt_id::text,CASE WHEN p.status='ready' AND p.expires_at<=clock_timestamp() THEN 'expired' ELSE p.status END,coalesce(p.invalidation_reason,o.terminal_reason,''),p.revision,coalesce(encode(p.manifest_digest,'hex'),''),p.profile_id,p.ready_at,p.expires_at,s.project_id::text,s.environment_id::text FROM cosmoformer.plans p JOIN cosmoformer.operations o ON o.id=p.operation_id JOIN cosmoformer.stacks s ON s.id=p.stack_id ORDER BY p.created_at DESC,p.id LIMIT 100`)
+			rows, e := tx.Query(ctx, `SELECT p.id::text,o.run_id::text,p.operation_id::text,p.attempt_id::text,CASE WHEN p.status='ready' AND p.expires_at<=clock_timestamp() THEN 'expired' ELSE p.status END,coalesce(p.invalidation_reason,o.terminal_reason,''),p.revision,coalesce(encode(p.manifest_digest,'hex'),''),p.profile_id,p.ready_at,p.expires_at,s.project_id::text,s.environment_id::text FROM cosmoformer.plans p JOIN cosmoformer.operations o ON o.id=p.operation_id JOIN cosmoformer.stacks s ON s.id=p.stack_id WHERE `+workspaceScope+` AND ($5='' OR (p.created_at,p.id)<(SELECT p.created_at,p.id FROM cosmoformer.plans p JOIN cosmoformer.stacks s ON s.id=p.stack_id WHERE `+workspaceScope+` AND p.id::text=$5)) ORDER BY p.created_at DESC,p.id DESC LIMIT $6`, viewScopes(grants, false), in.Project, in.Environment, in.Stack, in.Before, in.Limit+1)
 			if e != nil {
 				return e
 			}
@@ -74,18 +77,33 @@ func (a *Server) registerPlanningReads(api huma.API) {
 					out.Body.Plans = append(out.Body.Plans, p)
 				}
 			}
-			return rows.Err()
+			err := rows.Err()
+			rows.Close()
+			if err != nil {
+				return err
+			}
+			if len(out.Body.Plans) > in.Limit {
+				out.Body.Plans = out.Body.Plans[:in.Limit]
+				out.Body.Next = out.Body.Plans[in.Limit-1].ID
+			}
+			for i := range out.Body.Plans {
+				if err = planEvidenceStatus(ctx, tx, &out.Body.Plans[i]); err != nil {
+					return err
+				}
+			}
+			return nil
 		})
 		return out, e
 	})
 	register(api, "GET", "/organizations/{org}/runs/{id}/changes", "run-changes", func(ctx context.Context, in *ChangesInput) (*ChangesOutput, error) {
 		var artifact string
+		var boundArtifact string
 		out := &ChangesOutput{}
 		authorize := func(fn func(pgx.Tx) error) error {
 			return a.Store.ActorTx(ctx, request(ctx).Hash, in.Org, func(tx pgx.Tx, actor store.Actor) error {
 				var project, env string
 				var available bool
-				if e := tx.QueryRow(ctx, `SELECT s.project_id::text,s.environment_id::text,p.status='ready' AND p.expires_at>clock_timestamp() AND p.revision=$3,p.revision,coalesce(encode(p.manifest_digest,'hex'),''),coalesce((SELECT id::text FROM cosmoformer.artifacts WHERE plan_id=p.id AND attempt_id=p.attempt_id AND kind='normalized_changes' AND state='finalized' ORDER BY created_at DESC,id DESC LIMIT 1),'') FROM cosmoformer.plans p JOIN cosmoformer.operations o ON o.id=p.operation_id JOIN cosmoformer.stacks s ON s.id=p.stack_id WHERE p.id=$1 AND o.run_id=$2`, in.Plan, in.ID, in.Revision).Scan(&project, &env, &available, &out.Body.Revision, &out.Body.Manifest, &artifact); e != nil {
+				if e := tx.QueryRow(ctx, `SELECT s.project_id::text,s.environment_id::text,p.ready_at IS NOT NULL AND p.revision=$3 AND ($4='' OR encode(p.manifest_digest,'hex')=$4),p.revision,coalesce(encode(p.manifest_digest,'hex'),''),`+retainedChangesID+` FROM cosmoformer.plans p JOIN cosmoformer.operations o ON o.id=p.operation_id JOIN cosmoformer.stacks s ON s.id=p.stack_id WHERE p.id=$1 AND o.run_id=$2`, in.Plan, in.ID, in.Revision, in.Manifest).Scan(&project, &env, &available, &out.Body.Revision, &out.Body.Manifest, &artifact); e != nil {
 					return store.ErrNotFound
 				}
 				grants, e := store.GrantsFor(ctx, tx, actor.ID)
@@ -97,6 +115,13 @@ func (a *Server) registerPlanningReads(api huma.API) {
 				}
 				if !available {
 					return store.ErrConflict
+				}
+				if boundArtifact != "" && boundArtifact != artifact {
+					return store.ErrConflict
+				}
+				boundArtifact = artifact
+				if artifact == "" {
+					return problem(ctx, 409, "Retained Changes are unavailable. Request a fresh plan.")
 				}
 				return fn(tx)
 			})

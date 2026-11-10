@@ -1,2 +1,2 @@
 import { type RouteConfig, route, index } from '@react-router/dev/routes';
-export default [index('routes/organizations.tsx'), route('organizations', 'routes/organizations.tsx', { id: 'organizations' }), route('login', 'routes/login.tsx'), route('account/:purpose', 'routes/account.tsx')] satisfies RouteConfig;
+export default [index('routes/organizations.tsx'), route('organizations', 'routes/organizations.tsx', { id: 'organizations' }), route('o/:org/p/:project', 'routes/project.tsx'), route('o/:org/p/:project/stacks/:stack', 'routes/stack.tsx'), route('o/:org/p/:project/runs/:run', 'routes/run.tsx'), route('login', 'routes/login.tsx'), route('account/:purpose', 'routes/account.tsx')] satisfies RouteConfig;

@@ -23,7 +23,7 @@ export async function api<K extends keyof Schema>(path: string, schema: K, optio
             headers['X-CSRF-Token'] = csrf;
     }
     const response = await fetch('/api/v1' + path, { method, headers, credentials: 'same-origin', cache: 'no-store', body: mutation ? JSON.stringify(options.body ?? {}) : undefined, signal: options.signal });
-    if (response.status === 401) {
+    if (response.status === 401 && !options.signal?.aborted) {
         setCSRF(null);
         window.dispatchEvent(new Event('cosmoformer:expired'));
     }
