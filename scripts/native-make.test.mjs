@@ -55,6 +55,7 @@ test('actual Make recipe passes valid JavaScript and runs only both pinned isola
         assert.ok(build.includes(`ENGINE_SHA256=${profile.engine_archive.sha256}`));
         assert.equal(run[0], 'run');
         for (const flag of ['--rm', '--network=none', '--read-only', '/tmp:rw,exec,nosuid,nodev,size=1g']) assert.ok(run.includes(flag));
+        for (const [flag, value] of [['--cpus', '2'], ['--memory', '3g'], ['--pids-limit', '256'], ['--cap-drop', 'ALL'], ['--security-opt', 'no-new-privileges']]) assert.equal(run[run.indexOf(flag) + 1], value);
         assert.equal(run.at(-1), `cosmoformer-native-tests:${profile.engine}-${profile.version}`);
         assert.ok(!run.some(arg => /DSN|mount|privileged/.test(arg)));
     }

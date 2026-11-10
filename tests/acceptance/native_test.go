@@ -40,6 +40,35 @@ type nativeHarness struct {
 	profile           nativeProfile
 	binary, home, cli string
 }
+
+// Each parallel scenario owns all mutable engine/Git configuration and state.
+// Only the pinned binaries, provider mirror and fixture corpus are shared.
+func (h nativeHarness) forTest(t *testing.T) nativeHarness {
+	t.Helper()
+	h.t = t
+	h.home = t.TempDir()
+	h.cli = filepath.Join(h.home, "native.tfrc")
+	writeNative(t, h.cli, []byte("disable_checkpoint = true\nprovider_installation {\n filesystem_mirror { path = \"/fixtures/provider-mirror\" }\n}\n"))
+	return h
+}
+
+func TestNativeScenarioDirectoriesAreIsolated(t *testing.T) {
+	base := nativeHarness{profile: nativePins("opentofu"), binary: "/synthetic/tofu"}
+	a, b := base.forTest(t), base.forTest(t)
+	if a.home == b.home || a.cli == b.cli || a.t != t || b.t != t {
+		t.Fatal("native scenarios share mutable directories or the wrong test owner")
+	}
+	before, e := os.ReadFile(b.cli)
+	if e != nil {
+		t.Fatal(e)
+	}
+	writeNative(t, a.cli, []byte("synthetic changed configuration"))
+	after, e := os.ReadFile(b.cli)
+	if e != nil || !bytes.Equal(before, after) {
+		t.Fatal("one scenario changed another scenario's engine configuration", e)
+	}
+}
+
 type cappedNativeOutput struct {
 	bytes.Buffer
 	remaining int64
@@ -181,20 +210,17 @@ func TestNativeEngineCompatibility(t *testing.T) {
 	if e != nil || meta.Engine != p.Engine || meta.Version != p.Version {
 		t.Fatal("baked runtime identity mismatch", e)
 	}
-	home := t.TempDir()
-	cli := filepath.Join(home, "native.tfrc")
-	writeNative(t, cli, []byte("disable_checkpoint = true\nprovider_installation {\n filesystem_mirror { path = \"/fixtures/provider-mirror\" }\n}\n"))
-	h := nativeHarness{t, p, binary, home, cli}
+	h := (nativeHarness{profile: p, binary: binary}).forTest(t)
 	var version struct {
 		Version  string `json:"terraform_version"`
 		Platform string `json:"platform"`
 	}
-	if e = json.Unmarshal(h.run(home, "", 0, "version", "-json"), &version); e != nil || version.Version != p.Version || version.Platform != "linux_amd64" {
+	if e = json.Unmarshal(h.run(h.home, "", 0, "version", "-json"), &version); e != nil || version.Version != p.Version || version.Platform != "linux_amd64" {
 		t.Fatal("version -json identity mismatch", e)
 	}
 	t.Run("AWS_schema_offline", func(t *testing.T) {
-		h := h
-		h.t = t
+		t.Parallel()
+		h := h.forTest(t)
 		registry := strings.Split(p.Packages[1].Sources[0], "/hashicorp/")[0]
 		checkout := h.repository(fmt.Sprintf("terraform {\n required_providers {\n aws = { source = %q, version = \"6.41.0\" }\n }\n}\n", registry+"/hashicorp/aws"))()
 		h.run(checkout, "", 0, "init", "-input=false", "-no-color")
@@ -236,13 +262,13 @@ func TestNativeEngineCompatibility(t *testing.T) {
 		h.verifyRetainedDataSources(checkout, rawSchema)
 	})
 	t.Run("repository_relative_inputs", func(t *testing.T) {
-		h := h
-		h.t = t
+		t.Parallel()
+		h := h.forTest(t)
 		h.repositoryRelativeInputs()
 	})
 	t.Run("required_owner_attribute_rejected", func(t *testing.T) {
-		h := h
-		h.t = t
+		t.Parallel()
+		h := h.forTest(t)
 		b := newNativeBackend(t)
 		dir := h.repository(fmt.Sprintf("terraform {\n backend \"s3\" {\n bucket = \"fictional-state-bucket\"\n key = \"state.tfstate\"\n region = \"eu-west-1\"\n expected_bucket_owner = \"111122223333\"\n encrypt = true\n use_lockfile = true\n%s }\n}\n", nativeEndpointConfig(b)))()
 		h.reject(dir, "", "expected_bucket_owner", "init", "-input=false", "-no-color")
@@ -251,8 +277,8 @@ func TestNativeEngineCompatibility(t *testing.T) {
 	for _, profile := range []string{"s3", "dynamodb", "dual"} {
 		for _, workspace := range []string{"default", "review", "custom"} {
 			t.Run(profile+"/"+workspace, func(t *testing.T) {
-				h := h
-				h.t = t
+				t.Parallel()
+				h := h.forTest(t)
 				h.backendScenario(profile, workspace, profile == "s3", false)
 			})
 		}
@@ -260,15 +286,15 @@ func TestNativeEngineCompatibility(t *testing.T) {
 	if p.Engine == "opentofu" {
 		for _, workspace := range []string{"default", "review", "custom"} {
 			t.Run("path_segments/"+workspace, func(t *testing.T) {
-				h := h
-				h.t = t
+				t.Parallel()
+				h := h.forTest(t)
 				h.backendScenario("s3", workspace, true, true)
 			})
 		}
 	} else {
 		t.Run("repeated_slash_key_rejected", func(t *testing.T) {
-			h := h
-			h.t = t
+			t.Parallel()
+			h := h.forTest(t)
 			b := newNativeBackend(t)
 			attrs := map[string]any{"bucket": nativeBucket, "key": "paths//state", "region": "eu-west-1", "encrypt": true, "use_lockfile": true}
 			if _, e := source.CanonicalBackend(attrs, h.backendContext("review"), ""); e == nil {
@@ -746,94 +772,99 @@ func (h nativeHarness) verifyAnalysisFixtures(dir string, schema []byte) {
 	if e != nil || json.Unmarshal(b, &fixture) != nil {
 		t.Fatal("missing native analysis fixture corpus", e)
 	}
-	for _, f := range fixture.Cases {
-		t.Run("analysis/"+f.Name, func(t *testing.T) {
-			var native map[string]any
-			d := json.NewDecoder(bytes.NewReader(f.Plan))
-			d.UseNumber()
-			if d.Decode(&native) != nil {
-				t.Fatal("fixture JSON")
-			}
-			// Only translate the fixture engine/provider identity. Preserve deliberately
-			// malformed format/version cases so production validation must reject them.
-			if native["terraform_version"] == "1.13.8" {
-				native["terraform_version"] = h.profile.Version
-			}
-			options := o
-			options.ResourceIDs = map[string]string{}
-			options.OutputIDs = map[string]string{}
-			options.Secrets = &evidence.Registry{}
-			for _, kind := range []string{"resource_changes", "resource_drift"} {
-				if a, ok := native[kind].([]any); ok {
-					for _, v := range a {
-						r := v.(map[string]any)
-						r["provider_name"] = h.profile.Packages[1].Sources[0]
-						options.ResourceIDs[r["address"].(string)] = "11111111-1111-4111-8111-111111111111"
-					}
+	// A synchronous group waits for all independent analysis cases before the
+	// following retained-data-source scenarios can alter their native checkout.
+	t.Run("analysis", func(t *testing.T) {
+		for _, f := range fixture.Cases {
+			t.Run(f.Name, func(t *testing.T) {
+				t.Parallel()
+				var native map[string]any
+				d := json.NewDecoder(bytes.NewReader(f.Plan))
+				d.UseNumber()
+				if d.Decode(&native) != nil {
+					t.Fatal("fixture JSON")
 				}
-			}
-			if outputs, ok := native["output_changes"].(map[string]any); ok {
-				for name := range outputs {
-					options.OutputIDs[name] = "22222222-2222-4222-8222-222222222222"
+				// Only translate the fixture engine/provider identity. Preserve deliberately
+				// malformed format/version cases so production validation must reject them.
+				if native["terraform_version"] == "1.13.8" {
+					native["terraform_version"] = h.profile.Version
 				}
-			}
-			for _, s := range f.Secrets {
-				terms, e := evidence.SecretTerms(s.Value, s.JSON)
-				if e != nil || options.Secrets.Register(terms...) != nil {
-					t.Fatal("invalid fixture secrets")
-				}
-			}
-			raw, _ := json.Marshal(native)
-			out, e := plan.Analyze(raw, schema, options)
-			if f.Error {
-				if e == nil || out != nil {
-					t.Fatal("invalid native analysis accepted")
-				}
-				return
-			}
-			if e != nil {
-				t.Fatal(e)
-			}
-			if len(out.Findings) != len(f.Expected) {
-				t.Fatalf("unexpected findings: %+v", out.Findings)
-			}
-			for i, w := range f.Expected {
-				f := out.Findings[i]
-				if f.Rule != w.Rule || f.Severity != w.Severity || w.Message != "" && f.Message != w.Message {
-					t.Fatalf("unexpected native finding: %+v", f)
-				}
-			}
-			retained, _ := json.Marshal(out)
-			var decoded plan.Result
-			if json.Unmarshal(retained, &decoded) != nil || plan.VerifySanitized(out, &decoded) != nil {
-				t.Fatal("native retained analysis failed independent verification")
-			}
-			if resources, ok := native["resource_changes"].([]any); ok && len(resources) == 1 {
-				typ, _ := resources[0].(map[string]any)["type"].(string)
-				if typ != "" {
-					if options.Secrets.Register(typ) != nil {
-						t.Fatal("mask registry")
-					}
-					masked, err := plan.Analyze(raw, schema, options)
-					if err != nil {
-						t.Fatal("masked native dispatch", err)
-					}
-					if len(masked.Findings) != len(out.Findings) {
-						t.Fatal("masked native dispatch omitted warnings")
-					}
-					for i, finding := range masked.Findings {
-						if finding.Rule != out.Findings[i].Rule || finding.Severity != out.Findings[i].Severity {
-							t.Fatal("masked native dispatch downgraded warning")
+				options := o
+				options.ResourceIDs = map[string]string{}
+				options.OutputIDs = map[string]string{}
+				options.Secrets = &evidence.Registry{}
+				for _, kind := range []string{"resource_changes", "resource_drift"} {
+					if a, ok := native[kind].([]any); ok {
+						for _, v := range a {
+							r := v.(map[string]any)
+							r["provider_name"] = h.profile.Packages[1].Sources[0]
+							options.ResourceIDs[r["address"].(string)] = "11111111-1111-4111-8111-111111111111"
 						}
 					}
-					public, _ := json.Marshal(masked)
-					if bytes.Contains(public, []byte(typ)) {
-						t.Fatal("masked identifier serialized")
+				}
+				if outputs, ok := native["output_changes"].(map[string]any); ok {
+					for name := range outputs {
+						options.OutputIDs[name] = "22222222-2222-4222-8222-222222222222"
 					}
 				}
-			}
-		})
-	}
+				for _, s := range f.Secrets {
+					terms, e := evidence.SecretTerms(s.Value, s.JSON)
+					if e != nil || options.Secrets.Register(terms...) != nil {
+						t.Fatal("invalid fixture secrets")
+					}
+				}
+				raw, _ := json.Marshal(native)
+				out, e := plan.Analyze(raw, schema, options)
+				if f.Error {
+					if e == nil || out != nil {
+						t.Fatal("invalid native analysis accepted")
+					}
+					return
+				}
+				if e != nil {
+					t.Fatal(e)
+				}
+				if len(out.Findings) != len(f.Expected) {
+					t.Fatalf("unexpected findings: %+v", out.Findings)
+				}
+				for i, w := range f.Expected {
+					f := out.Findings[i]
+					if f.Rule != w.Rule || f.Severity != w.Severity || w.Message != "" && f.Message != w.Message {
+						t.Fatalf("unexpected native finding: %+v", f)
+					}
+				}
+				retained, _ := json.Marshal(out)
+				var decoded plan.Result
+				if json.Unmarshal(retained, &decoded) != nil || plan.VerifySanitized(out, &decoded) != nil {
+					t.Fatal("native retained analysis failed independent verification")
+				}
+				if resources, ok := native["resource_changes"].([]any); ok && len(resources) == 1 {
+					typ, _ := resources[0].(map[string]any)["type"].(string)
+					if typ != "" {
+						if options.Secrets.Register(typ) != nil {
+							t.Fatal("mask registry")
+						}
+						masked, err := plan.Analyze(raw, schema, options)
+						if err != nil {
+							t.Fatal("masked native dispatch", err)
+						}
+						if len(masked.Findings) != len(out.Findings) {
+							t.Fatal("masked native dispatch omitted warnings")
+						}
+						for i, finding := range masked.Findings {
+							if finding.Rule != out.Findings[i].Rule || finding.Severity != out.Findings[i].Severity {
+								t.Fatal("masked native dispatch downgraded warning")
+							}
+						}
+						public, _ := json.Marshal(masked)
+						if bytes.Contains(public, []byte(typ)) {
+							t.Fatal("masked identifier serialized")
+						}
+					}
+				}
+			})
+		}
+	})
 	if t.Failed() {
 		return
 	}

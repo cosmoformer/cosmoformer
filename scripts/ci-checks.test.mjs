@@ -58,6 +58,11 @@ test('four deterministic shards cover every discovered test once, including new 
     assert.deepEqual(selectShard([...names].reverse(), 2), shards[2]);
     for (const [list, index, count] of [[[], 0, 4], [names, 4, 4], [names, -1, 4], [names, 0, 0], [[...names, names[0]], 0, 4], [['TestInjected|All', ...names], 0, 4]]) assert.throws(() => selectShard(list, index, count));
 });
+test('shard assignment uses stable code-unit ordering for Unicode test names', () => {
+    const names = ['TestΩmega', 'TestÄpfel', 'TestZulu', 'TestÉpsilon', 'Test_underscore', 'TestAlpha'];
+    assert.deepEqual(selectShard(names, 0), ['TestAlpha', 'TestÉpsilon']);
+    assert.deepEqual(selectShard(names, 1), ['TestZulu', 'TestΩmega']);
+});
 test('test events must prove the exact top-level selection, not merely a successful process', () => {
     const event = (Test, Action = 'pass') => JSON.stringify({Test, Action});
     assert.deepEqual(verifyTestEvents([event('TestA', 'run'), event('TestA/subtest'), event('TestA'), event('TestB', 'skip')].join('\n'), ['TestA', 'TestB']), ['TestA', 'TestB']);

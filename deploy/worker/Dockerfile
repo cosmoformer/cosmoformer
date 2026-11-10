@@ -8,8 +8,11 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
-RUN CGO_ENABLED=0 go build -trimpath -o /out/cosmoformer-worker ./cmd/worker \
- && CGO_ENABLED=0 go test -c -o /out/source.test ./internal/source \
+RUN CGO_ENABLED=0 go build -trimpath -o /out/cosmoformer-worker ./cmd/worker
+
+# Native/coverage/worker targets do not need ordinary source-test binaries.
+FROM build AS source-test-build
+RUN CGO_ENABLED=0 go test -c -o /out/source.test ./internal/source \
  && CGO_ENABLED=0 go test -c -o /out/worker.test ./internal/worker \
  && CGO_ENABLED=0 go test -c -o /out/clock.test ./internal/clock \
  && CGO_ENABLED=0 go test -c -o /out/command.test ./cmd/worker
@@ -56,7 +59,7 @@ ENTRYPOINT ["/usr/local/bin/cosmoformer-worker"]
 
 FROM runtime AS source-tests
 ENV COSMOFORMER_TEST_SOURCE=1
-COPY --from=build /out/source.test /out/worker.test /out/clock.test /out/command.test /tests/
+COPY --from=source-test-build /out/source.test /out/worker.test /out/clock.test /out/command.test /tests/
 ENTRYPOINT ["/bin/sh", "-ec", "for suite in source worker clock command; do /tests/$suite.test -test.v -test.timeout=90s; done"]
 
 FROM build AS coverage-build
@@ -88,7 +91,7 @@ COPY --from=native-test-build /out/acceptance.test /usr/local/bin/cosmoformer-na
 COPY --from=native-test-build /out/provider-mirror /fixtures/provider-mirror
 COPY deploy/worker/runtimes.json /fixtures/runtimes.json
 COPY internal/testdata/plans.json internal/testdata/compatibility.json /fixtures/plan-analysis/
-ENTRYPOINT ["/usr/local/bin/cosmoformer-native-tests", "-test.run=^TestNativeEngineCompatibility$", "-test.v", "-test.timeout=20m"]
+ENTRYPOINT ["/usr/local/bin/cosmoformer-native-tests", "-test.run=^TestNativeEngineCompatibility$", "-test.parallel=2", "-test.v", "-test.timeout=20m"]
 
 # Local tooling depends only on reviewed public packages, never application code.
 FROM engine AS local-provider-build

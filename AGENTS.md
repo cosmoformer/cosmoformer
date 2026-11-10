@@ -12,6 +12,7 @@ No functional product release is currently available.
 
 ## Restrictions
 
+- Use `feat/<description>` for new feature and improvement branches.
 - Do not assume that proposed features or architectural designs have been approved or implemented.
 - Do not introduce programming languages, frameworks, dependencies, or architectural decisions without authorization.
 - Do not create speculative implementations, placeholder infrastructure, or unnecessary scaffolding.

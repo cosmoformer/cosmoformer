@@ -7,6 +7,8 @@ import {beginCoverage, coverageIdentity} from './sonar-coverage.mjs';
 import {mergeProfiles} from './merge-go-coverage.mjs';
 import {checkGoCoverage} from './check-go-coverage.mjs';
 
+// Code-unit ordering is intentional: artifact/test order must not depend on locale.
+const compareText = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 const root = path.resolve(import.meta.dirname, '..');
 export const shardCount = 4;
 export const producerReports = {
@@ -16,8 +18,8 @@ export const producerReports = {
     web: ['web/lcov.info'], scripts: ['workflows/lcov.info', 'contract/lcov.info'], runtime: ['runtime/lcov.info'],
 };
 export function requireSuccessfulJobs(jobs) {
-    const required = [...new Set(Object.keys(producerReports).map(id => id.replace(/-\d+$/, ''))), 'native'].sort();
-    if (!jobs || !equal(Object.keys(jobs).sort(), required) || Object.values(jobs).some(job => job.result !== 'success')) throw Error('Every parallel test job must succeed before coverage aggregation');
+    const required = [...new Set(Object.keys(producerReports).map(id => id.replace(/-\d+$/, ''))), 'native'].sort(compareText);
+    if (!jobs || !equal(Object.keys(jobs).sort(compareText), required) || Object.values(jobs).some(job => job.result !== 'success')) throw Error('Every parallel test job must succeed before coverage aggregation');
 }
 const contextRoots = ['web/app/.generated/api.ts', 'web/app/.generated/validators.d.ts', 'web/.react-router/types'];
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -44,7 +46,7 @@ function belongsToRun(expected, receipt) {
 }
 function filesAt(base, relative) {
     const file = path.join(base, relative), status = lstatSync(file);
-    if (status.isDirectory()) return readdirSync(file).sort().flatMap(name => filesAt(base, `${relative}/${name}`));
+    if (status.isDirectory()) return readdirSync(file).sort(compareText).flatMap(name => filesAt(base, `${relative}/${name}`));
     if (!status.isFile() || status.nlink !== 1) throw Error('Coverage inputs must be regular, unlinked files');
     return [relative];
 }
@@ -62,7 +64,7 @@ function checkedRead(base, relative) {
 }
 export function selectShard(names, index, count = shardCount) {
     if (!Number.isInteger(index) || !Number.isInteger(count) || count < 1 || index < 0 || index >= count || names.length < count || new Set(names).size !== names.length || names.some(name => !/^(Test|Example|Fuzz)[\p{L}\p{N}_]*$/u.test(name))) throw Error('Invalid acceptance test inventory or shard');
-    return [...names].sort().filter((_, i) => i % count === index);
+    return [...names].sort(compareText).filter((_, i) => i % count === index);
 }
 export function beginProducer(id, options) {
     requireProducer(id);
@@ -101,8 +103,8 @@ export function verifyTestEvents(output, selected) {
             completed.push(event.Test);
         }
     }
-    if (!equal([...completed].sort(), [...selected].sort())) throw Error('Acceptance shard did not execute its exact test selection');
-    return completed.sort();
+    if (!equal([...completed].sort(compareText), [...selected].sort(compareText))) throw Error('Acceptance shard did not execute its exact test selection');
+    return completed.sort(compareText);
 }
 export function runGoProducer(id, options) {
     if (id !== 'backend' && !/^acceptance-[0-3]$/.test(id)) throw Error('Unknown Go producer');
@@ -115,7 +117,7 @@ export function runGoProducer(id, options) {
     try {
         let tests, args = ['./internal/...', './cmd/...'];
         if (id !== 'backend') {
-            const inventory = invoke(['test', ...flags, '-list=.', './tests/acceptance', '-args', '-test.gocoverdir=' + raw]).split('\n').filter(line => /^(Test|Example|Fuzz)/.test(line)).sort();
+            const inventory = invoke(['test', ...flags, '-list=.', './tests/acceptance', '-args', '-test.gocoverdir=' + raw]).split('\n').filter(line => /^(Test|Example|Fuzz)/.test(line)).sort(compareText);
             const selected = selectShard(inventory, Number(id.at(-1)));
             tests = {inventory, selected};
             args = ['-run=^(' + selected.join('|') + ')$', './tests/acceptance'];
@@ -134,22 +136,22 @@ function validateSelection(receipts) {
         if (!tests || inventory && !equal(inventory, tests.inventory)) throw Error('Acceptance shard inventories differ or are missing');
         inventory = tests.inventory;
         const selected = selectShard(inventory, i);
-        if (!equal(selected, tests.selected) || !equal([...selected].sort(), tests.completed)) throw Error('Missing or incorrect acceptance shard execution');
+        if (!equal(selected, tests.selected) || !equal([...selected].sort(compareText), tests.completed)) throw Error('Missing or incorrect acceptance shard execution');
     }
 }
 export function assembleCoverage(input, options) {
     const o = settings(options), expected = identity(o), ids = Object.keys(producerReports);
-    if (!equal(readdirSync(input).sort(), ids.map(id => `coverage-${id}`).sort())) throw Error('Coverage producers are missing or unexpected');
+    if (!equal(readdirSync(input).sort(compareText), ids.map(id => `coverage-${id}`).sort(compareText))) throw Error('Coverage producers are missing or unexpected');
     const receipts = {}, contents = new Map();
     for (const id of ids) {
         const dir = path.join(input, `coverage-${id}`);
         if (!lstatSync(dir).isDirectory() || lstatSync(dir).isSymbolicLink()) throw Error('Invalid coverage bundle directory');
         const receipt = JSON.parse(checkedRead(dir, 'receipt.json'));
         if (receipt.version !== 1 || receipt.id !== id || !belongsToRun(expected, receipt)) throw Error('Coverage belongs to another producer, commit or workflow run');
-        const names = Object.keys(receipt.files).sort(), required = producerReports[id];
+        const names = Object.keys(receipt.files).sort(compareText), required = producerReports[id];
         if (required.some(file => !names.includes(file)) || names.some(file => !required.includes(file) && !(id === 'web' && (/^context\/web\/\.react-router\/types\/.+\.ts$/.test(file) || contextRoots.slice(0, 2).some(root => file === `context/${root}`))))) throw Error('Unexpected or missing coverage files');
         if (id === 'web' && (contextRoots.slice(0, 2).some(root => !names.includes(`context/${root}`)) || !names.some(file => file.startsWith('context/web/.react-router/types/')))) throw Error('Missing generated frontend context');
-        if (!equal(filesAt(dir, '.').map(file => file.slice(2)).sort(), ['receipt.json', ...names].sort())) throw Error('Unreceipted artifact files');
+        if (!equal(filesAt(dir, '.').map(file => file.slice(2)).sort(compareText), ['receipt.json', ...names].sort(compareText))) throw Error('Unreceipted artifact files');
         for (const file of names) {
             const bytes = checkedRead(dir, file);
             if (hash(bytes) !== receipt.files[file] || contents.has(file)) throw Error('Changed or duplicate coverage output');
