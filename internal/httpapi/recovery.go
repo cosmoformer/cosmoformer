@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/cosmoformer/cosmoformer/internal/access"
 	"github.com/cosmoformer/cosmoformer/internal/coordinator"
@@ -93,12 +94,55 @@ func recoveryFor(ctx context.Context, tx pgx.Tx, actor store.Actor, id string, a
 		return r, e
 	}
 	r.CanClear = r.CanEvidence && r.Stop && r.Reconciled && r.Count >= r.Minimum && !unresolved
+	var maintenance, unreliable bool
+	if e = tx.QueryRow(ctx, `SELECT maintenance,clock_unreliable FROM cosmoformer.installation`).Scan(&maintenance, &unreliable); e != nil {
+		return r, e
+	}
+	if maintenance || unreliable {
+		r.CanApprove, r.CanClear, r.CanPlan = false, false, false
+	}
 	if r.Evidence != nil && !access.Allows(g, r.Project, r.Environment, access.RawEvidenceRead) {
 		r.Evidence.Stop.Reference = ""
 		r.Evidence.Reconciliation.References = []string{}
 	}
 	return r, nil
 }
+
+// Recovery receipts retain only immutable event identity. Replays project the
+// subject again under current grants, evidence and policy, never a cached DTO.
+func mutateRecovery(a *Server, ctx context.Context, org, id string, action access.Action, fn func(pgx.Tx, store.Actor) (*RecoveryOutput, error)) (*RecoveryOutput, error) {
+	var out *RecoveryOutput
+	e := a.tx(ctx, org, func(tx pgx.Tx, actor store.Actor) error {
+		r, e := recoveryFor(ctx, tx, actor, id, action)
+		if e != nil {
+			return e
+		}
+		receipt, found, e := browserReceipt[RecoveryOutput](ctx, tx, actor)
+		if e != nil {
+			return e
+		}
+		if found {
+			out = &RecoveryOutput{Body: r.RecoveryPublic}
+			if receipt != nil {
+				out.Body.Event = receipt.Body.Event
+			}
+			return nil
+		}
+		out, e = fn(tx, actor)
+		if e != nil {
+			return e
+		}
+		raw, e := json.Marshal(&RecoveryOutput{Body: RecoveryPublic{Event: out.Body.Event}})
+		if e != nil {
+			return e
+		}
+		d := request(ctx)
+		_, e = tx.Exec(ctx, `SELECT cosmoformer.save_browser_request($1,$2,$3,$4::jsonb,false)`, actor.ID, d.Key, d.Digest, string(raw))
+		return e
+	})
+	return out, e
+}
+
 func (a *Server) registerRecovery(api huma.API) {
 	a.registerAttemptStop(api)
 	register(api, "GET", "/organizations/{org}/recoveries/{id}", "read-recovery", func(ctx context.Context, in *OrgIDPath) (*RecoveryOutput, error) {
@@ -126,10 +170,7 @@ func (a *Server) registerRecovery(api huma.API) {
 		})
 	})
 	register(api, "PATCH", "/organizations/{org}/recoveries/{id}/evidence", "recovery-evidence", func(ctx context.Context, in *RecoveryInput) (*RecoveryOutput, error) {
-		return mutate(a, ctx, in.Org, false, func(tx pgx.Tx, actor store.Actor) error {
-			_, e := recoveryFor(ctx, tx, actor, in.ID, access.Apply)
-			return e
-		}, func(tx pgx.Tx, actor store.Actor) (*RecoveryOutput, error) {
+		return mutateRecovery(a, ctx, in.Org, in.ID, access.Apply, func(tx pgx.Tx, actor store.Actor) (*RecoveryOutput, error) {
 			r, e := recoveryFor(ctx, tx, actor, in.ID, access.Apply)
 			if e != nil {
 				return nil, e
@@ -174,10 +215,7 @@ func (a *Server) registerRecovery(api huma.API) {
 		})
 	})
 	register(api, "POST", "/organizations/{org}/recoveries/{id}/approvals", "approve-recovery", func(ctx context.Context, in *RecoveryRevisionInput) (*RecoveryOutput, error) {
-		return mutate(a, ctx, in.Org, false, func(tx pgx.Tx, actor store.Actor) error {
-			_, e := recoveryFor(ctx, tx, actor, in.ID, access.Approve)
-			return e
-		}, func(tx pgx.Tx, actor store.Actor) (*RecoveryOutput, error) {
+		return mutateRecovery(a, ctx, in.Org, in.ID, access.Approve, func(tx pgx.Tx, actor store.Actor) (*RecoveryOutput, error) {
 			r, e := recoveryFor(ctx, tx, actor, in.ID, access.Approve)
 			if e != nil {
 				return nil, e
@@ -201,10 +239,7 @@ func (a *Server) registerRecovery(api huma.API) {
 		})
 	})
 	register(api, "POST", "/organizations/{org}/recoveries/{id}/clear", "clear-recovery", func(ctx context.Context, in *RecoveryRevisionInput) (*RecoveryOutput, error) {
-		return mutate(a, ctx, in.Org, false, func(tx pgx.Tx, actor store.Actor) error {
-			_, e := recoveryFor(ctx, tx, actor, in.ID, access.Apply)
-			return e
-		}, func(tx pgx.Tx, actor store.Actor) (*RecoveryOutput, error) {
+		return mutateRecovery(a, ctx, in.Org, in.ID, access.Apply, func(tx pgx.Tx, actor store.Actor) (*RecoveryOutput, error) {
 			r, e := recoveryFor(ctx, tx, actor, in.ID, access.Apply)
 			if e != nil {
 				return nil, e

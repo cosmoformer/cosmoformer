@@ -23,10 +23,11 @@ type processSupervisor struct {
 	interruptSent, killSent bool
 	controls                map[string]runs.ControlAck
 	requests                map[string]runs.Control
+	delivered               map[string]bool
 }
 
 func newSupervisor(id runs.Identity, attempt string) *processSupervisor {
-	return &processSupervisor{id: id, attempt: attempt, controls: map[string]runs.ControlAck{}, requests: map[string]runs.Control{}}
+	return &processSupervisor{id: id, attempt: attempt, controls: map[string]runs.ControlAck{}, requests: map[string]runs.Control{}, delivered: map[string]bool{}}
 }
 func withSupervisor(ctx context.Context, s *processSupervisor) context.Context {
 	return context.WithValue(ctx, supervisorKey{}, s)
@@ -113,10 +114,18 @@ func (a *Agent) deliverControls(controls []runs.Control) {
 		if e != nil {
 			continue
 		}
-		delivered := ack
-		delivered.State = "delivered"
-		if send("controls/ack", delivered) != nil {
-			continue
+		s.mu.Lock()
+		deliveredBefore := s.delivered[c.ID]
+		s.mu.Unlock()
+		if !deliveredBefore {
+			delivered := ack
+			delivered.State = "delivered"
+			if send("controls/ack", delivered) != nil {
+				continue
+			}
+			s.mu.Lock()
+			s.delivered[c.ID] = true
+			s.mu.Unlock()
 		}
 		_ = send("controls/ack", ack)
 	}

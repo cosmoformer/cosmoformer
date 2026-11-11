@@ -499,3 +499,105 @@ func TestMilestone9ContradictoryAcceptedStopNeedsManualAuthority(t *testing.T) {
 	f.exec(t, `UPDATE cosmoformer.grants SET revoked_at=clock_timestamp() WHERE role='deployer'`)
 	f.admin.callKey("PATCH", path+"/evidence", body, 403, key)
 }
+
+// A lost-response retry authorizes and projects current permissions, never the
+// protected references or eligibility cached when the mutation first committed.
+func TestMilestone9RecoveryReplayUsesCurrentEvidenceAuthority(t *testing.T) {
+	for _, route := range []string{"evidence", "approvals", "clear"} {
+		t.Run(route, func(t *testing.T) {
+			f := newApprovalFixture(t, 1)
+			deployer(t, f.executionFixture)
+			f.exec(t, `INSERT INTO cosmoformer.grants(org_id,team_id,project_id,environment_id,role) SELECT org_id,team_id,project_id,environment_id,'raw_evidence_read' FROM cosmoformer.grants WHERE role='planner' LIMIT 1`)
+			f.voter.call("POST", "/organizations/"+f.org+"/attempts/"+f.assignment.AttemptID+"/recovery", map[string]any{"expected_attempt_revision": attemptRevision(t, f.executionFixture)}, 200)
+			path := recoveryPath(f.executionFixture, caseID(t, f.executionFixture))
+			r := f.voter.call("GET", path, nil, 200)
+			method := "POST"
+			var body any
+			if route == "evidence" {
+				method = "PATCH"
+				body = recoveryBody(r["revision"], "agent", f.assignment.AttemptID, true)
+			} else {
+				r = f.voter.call("PATCH", path+"/evidence", recoveryBody(r["revision"], "agent", f.assignment.AttemptID, true), 200)
+				body = map[string]any{"expected_evidence_revision": r["evidence_revision"]}
+				if route == "clear" {
+					f.voter.call("POST", path+"/approvals", body, 200)
+				}
+			}
+			key := identity.Token()
+			first := f.voter.callKey(method, path+"/"+route, body, 200, key)
+			check := func(r map[string]any, raw bool) {
+				t.Helper()
+				ev := r["evidence"].(map[string]any)
+				ref := ev["stop_proof"].(map[string]any)["protected_reference"]
+				refs := ev["reconciliation"].(map[string]any)["protected_references"].([]any)
+				if raw && (ref != f.assignment.AttemptID || len(refs) != 1) || !raw && (ref != "" || len(refs) != 0) {
+					t.Fatal("wrong current reference visibility", r)
+				}
+				if r["vote_event_id"] != first["vote_event_id"] {
+					t.Fatal("retry changed original vote identity")
+				}
+			}
+			check(first, true)
+			check(f.voter.callKey(method, path+"/"+route, body, 200, key), true)
+			var receipt string
+			if e := f.db.Owner.QueryRow(context.Background(), `SELECT result::text FROM cosmoformer.browser_requests WHERE key=$1`, key).Scan(&receipt); e != nil {
+				t.Fatal(e)
+			}
+			if strings.Contains(receipt, f.assignment.AttemptID) || strings.Contains(receipt, "protected-record-74") {
+				t.Fatal("receipt retained protected recovery context")
+			}
+			// Also exercise receipts written by the original implementation. This is
+			// dummy fixture content and never a production browser receipt.
+			legacy, _ := json.Marshal(map[string]any{"Body": first})
+			f.exec(t, `UPDATE cosmoformer.browser_requests SET result=$2 WHERE key=$1`, key, legacy)
+			check(f.voter.callKey(method, path+"/"+route, body, 200, key), true)
+			f.exec(t, `UPDATE cosmoformer.grants SET revoked_at=clock_timestamp() WHERE role='raw_evidence_read'`)
+			check(f.voter.callKey(method, path+"/"+route, body, 200, key), false)
+			f.exec(t, `UPDATE cosmoformer.grants SET revoked_at=clock_timestamp() WHERE role='approver'`)
+			if route != "approvals" {
+				current := f.voter.callKey(method, path+"/"+route, body, 200, key)
+				if current["counted_approvals"] != float64(0) {
+					t.Fatal("replayed stale approval count", current)
+				}
+			}
+			action := "deployer"
+			if route == "approvals" {
+				action = "approver"
+			}
+			f.exec(t, `UPDATE cosmoformer.grants SET revoked_at=clock_timestamp() WHERE role=$1`, action)
+			f.voter.callKey(method, path+"/"+route, body, 403, key)
+			var events, versions int
+			if e := f.db.Owner.QueryRow(context.Background(), `SELECT (SELECT count(*) FROM cosmoformer.approvals WHERE subject_kind='recovery'),(SELECT count(*) FROM cosmoformer.recovery_evidence_versions)`).Scan(&events, &versions); e != nil {
+				t.Fatal(e)
+			}
+			want := 1
+			if route == "evidence" {
+				want = 0
+			}
+			if events != want || versions != 1 {
+				t.Fatal("retry repeated mutation", events, versions)
+			}
+		})
+	}
+}
+
+func TestMilestone9RecoveryPositiveAuthorityRespectsInstallationGate(t *testing.T) {
+	f := newApprovalFixture(t, 1)
+	deployer(t, f.executionFixture)
+	f.voter.call("POST", "/organizations/"+f.org+"/attempts/"+f.assignment.AttemptID+"/recovery", map[string]any{"expected_attempt_revision": attemptRevision(t, f.executionFixture)}, 200)
+	path := recoveryPath(f.executionFixture, caseID(t, f.executionFixture))
+	r := f.voter.call("GET", path, nil, 200)
+	for _, flag := range []string{"maintenance", "clock_unreliable"} {
+		f.exec(t, `UPDATE cosmoformer.installation SET `+flag+`=true`)
+		// Evidence and positive stop reports remain available during the gate.
+		r = f.voter.call("PATCH", path+"/evidence", recoveryBody(r["revision"], "agent", f.assignment.AttemptID, true), 200)
+		if r["can_approve"] != false || r["can_clear"] != false || r["can_plan"] != false {
+			t.Fatal("positive authority exposed during gate", r)
+		}
+		vote := map[string]any{"expected_evidence_revision": r["evidence_revision"]}
+		f.voter.call("POST", path+"/approvals", vote, 409)
+		f.voter.call("POST", path+"/clear", vote, 409)
+		f.exec(t, `UPDATE cosmoformer.installation SET `+flag+`=false`)
+		r = f.voter.call("GET", path, nil, 200)
+	}
+}

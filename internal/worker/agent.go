@@ -264,64 +264,8 @@ func (a *Agent) RunOne(ctx context.Context) error {
 	}
 	supervised := newSupervisor(a.Identity, assignment.AttemptID)
 	ctx = withSupervisor(ctx, supervised)
-	var sendMu sync.Mutex
-	seq := int64(1)
 	var last runs.Transition
-	var pending *runs.Message
-	var pendingRoute string
-	ambiguous := false
-	send := func(route string, payload any) error {
-		sendMu.Lock()
-		defer sendMu.Unlock()
-		raw, marshalErr := json.Marshal(payload)
-		if marshalErr != nil {
-			return ErrAgent
-		}
-		if pending != nil {
-			if pendingRoute != route || !bytes.Equal(pending.Payload, raw) {
-				return ErrAgent
-			}
-		} else {
-			pending = &runs.Message{Protocol: 1, MessageID: runs.ID(), Identity: a.Identity, AttemptID: assignment.AttemptID, Seq: seq, Payload: raw}
-			pendingRoute = route
-			ambiguous = false
-		}
-		var response runs.Transition
-		var err error
-		for retry := 0; retry < 2; retry++ {
-			err = a.call(ctx, "/attempts/"+assignment.AttemptID+"/"+route, *pending, &response)
-			if err == nil {
-				break
-			}
-			var rejected *Rejected
-			if !errors.As(err, &rejected) || rejected.Status >= 500 {
-				ambiguous = true
-			}
-			if ctx.Err() != nil {
-				break
-			}
-		}
-		if err != nil {
-			// A later rejection cannot disprove an earlier ambiguous commit.
-			if !ambiguous {
-				pending = nil
-				pendingRoute = ""
-			}
-			return err
-		}
-		if !response.Accepted || response.NextSeq != seq+1 {
-			ambiguous = true
-			return ErrAgent
-		}
-		seq++
-		if route != "controls/ack" {
-			last = response
-		}
-		pending = nil
-		pendingRoute = ""
-		ambiguous = false
-		return nil
-	}
+	send := a.orderedSender(ctx, assignment.AttemptID, &last)
 	a.mu.Lock()
 	a.active = supervised
 	a.controlSend = send
