@@ -6,15 +6,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"github.com/cosmoformer/cosmoformer/internal/httpapi"
 	"github.com/cosmoformer/cosmoformer/internal/identity"
 	"github.com/cosmoformer/cosmoformer/internal/runs"
 	"github.com/cosmoformer/cosmoformer/internal/source"
 	"github.com/cosmoformer/cosmoformer/internal/worker"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func deployer(t *testing.T, f *executionFixture) {
@@ -595,8 +599,12 @@ func TestMilestone9RecoveryPositiveAuthorityRespectsInstallationGate(t *testing.
 			t.Fatal("positive authority exposed during gate", r)
 		}
 		vote := map[string]any{"expected_evidence_revision": r["evidence_revision"]}
-		f.voter.call("POST", path+"/approvals", vote, 409)
-		f.voter.call("POST", path+"/clear", vote, 409)
+		status := 409
+		if flag == "clock_unreliable" {
+			status = 503
+		}
+		f.voter.call("POST", path+"/approvals", vote, status)
+		f.voter.call("POST", path+"/clear", vote, status)
 		f.exec(t, `UPDATE cosmoformer.installation SET `+flag+`=false`)
 		r = f.voter.call("GET", path, nil, 200)
 	}
@@ -646,6 +654,149 @@ func TestMilestone9ManualStopCannotBecomeAgentAuthority(t *testing.T) {
 				if e := f.db.Owner.QueryRow(context.Background(), `SELECT count(*) FROM cosmoformer.recovery_evidence_versions WHERE authority='agent_protocol'`).Scan(&versions); e != nil || versions != 0 {
 					t.Fatal("fabricated protocol history", versions, e)
 				}
+			}
+		})
+	}
+}
+
+// Start with a healthy persisted latch, then discover the fault at the fresh
+// positive mutation. Compare complete rows so vote identities and hold release
+// timestamps cannot change unnoticed.
+func TestMilestone9RecoveryFreshClockFence(t *testing.T) {
+	for _, route := range []string{"approvals", "clear"} {
+		for _, fault := range []string{"read failure", "database backward", "elapsed discrepancy"} {
+			t.Run(route+"/"+fault, func(t *testing.T) {
+				f := newApprovalFixture(t, 1)
+				deployer(t, f.executionFixture)
+				f.voter.call("POST", "/organizations/"+f.org+"/attempts/"+f.assignment.AttemptID+"/recovery", map[string]any{"expected_attempt_revision": attemptRevision(t, f.executionFixture)}, 200)
+				path := recoveryPath(f.executionFixture, caseID(t, f.executionFixture))
+				r := f.voter.call("GET", path, nil, 200)
+				r = f.voter.call("PATCH", path+"/evidence", recoveryBody(r["revision"], "agent", f.assignment.AttemptID, true), 200)
+				body := map[string]any{"expected_evidence_revision": r["evidence_revision"]}
+				// Establish this platform instance's trusted UTC/elapsed baseline.
+				f.voter.call("POST", path+"/approvals", body, 200)
+				f.provider.mu.Lock()
+				calls := f.provider.calls
+				f.provider.mu.Unlock()
+				snapshot := func() string {
+					t.Helper()
+					var s string
+					if e := f.db.Owner.QueryRow(context.Background(), `SELECT jsonb_build_array(
+					 (SELECT jsonb_agg(to_jsonb(r) ORDER BY id) FROM cosmoformer.recovery_cases r),
+					 (SELECT jsonb_agg(to_jsonb(v) ORDER BY case_id,account_id) FROM cosmoformer.recovery_votes v),
+					 (SELECT jsonb_agg(to_jsonb(a) ORDER BY id) FROM cosmoformer.approvals a),
+					 (SELECT jsonb_agg(to_jsonb(h) ORDER BY artifact_id,owner_kind,owner_id,reason) FROM cosmoformer.artifact_holds h),
+					 (SELECT jsonb_agg(to_jsonb(o) ORDER BY id) FROM cosmoformer.operations o),
+					 (SELECT jsonb_agg(to_jsonb(a) ORDER BY id) FROM cosmoformer.attempts a)
+					)::text`).Scan(&s); e != nil {
+						t.Fatal(e)
+					}
+					return s
+				}
+				before := snapshot()
+				switch fault {
+				case "read failure":
+					f.clock.mu.Lock()
+					f.clock.failed = true
+					f.clock.mu.Unlock()
+				case "database backward":
+					f.exec(t, `UPDATE cosmoformer.installation SET authority_highwater=clock_timestamp()+interval '1 hour'`)
+				case "elapsed discrepancy":
+					f.clock.mu.Lock()
+					f.clock.offset += 5 * time.Second
+					f.clock.mu.Unlock()
+				}
+				latched := func() bool {
+					t.Helper()
+					var b bool
+					if e := f.db.Owner.QueryRow(context.Background(), `SELECT clock_unreliable FROM cosmoformer.installation`).Scan(&b); e != nil {
+						t.Fatal(e)
+					}
+					return b
+				}
+				if latched() {
+					t.Fatal("fault was already latched")
+				}
+				key := identity.Token()
+				for range 2 {
+					response := f.voter.callKey("POST", path+"/"+route, body, 503, key)
+					if response["code"] != "CLOCK_UNRELIABLE" {
+						t.Fatal(response)
+					}
+					if snapshot() != before {
+						t.Fatal("rejected request changed recovery authority or holds")
+					}
+				}
+				if fault != "read failure" && !latched() {
+					t.Fatal("discrepancy latch rolled back")
+				}
+				var receipts int
+				if e := f.db.Owner.QueryRow(context.Background(), `SELECT count(*) FROM cosmoformer.browser_requests WHERE key=$1`, key).Scan(&receipts); e != nil || receipts != 0 {
+					t.Fatal("rejection saved a receipt", receipts, e)
+				}
+				// Reset fixture time only; production requires the host maintenance procedure.
+				f.clock.mu.Lock()
+				f.clock.failed = false
+				f.clock.offset = 0
+				f.clock.mu.Unlock()
+				f.exec(t, `UPDATE cosmoformer.installation SET clock_unreliable=false,authority_highwater=clock_timestamp(),authority_platform_instance=NULL`)
+				first := f.voter.callKey("POST", path+"/"+route, body, 200, key)
+				if route == "clear" && first["status"] != "cleared" || route == "approvals" && (first["vote_event_id"] == "" || first["counted_approvals"] != float64(1)) {
+					t.Fatal("healthy clock did not grant the requested recovery action", first)
+				}
+				after := snapshot()
+				if after == before {
+					t.Fatal("healthy clock request had no effect")
+				}
+				f.clock.mu.Lock()
+				f.clock.failed = true
+				f.clock.mu.Unlock()
+				again := f.voter.callKey("POST", path+"/"+route, body, 200, key)
+				if again["vote_event_id"] != first["vote_event_id"] || snapshot() != after {
+					t.Fatal("successful replay repeated effects")
+				}
+				role := "approver"
+				if route == "clear" {
+					role = "deployer"
+				}
+				f.exec(t, `UPDATE cosmoformer.grants SET revoked_at=clock_timestamp() WHERE role=$1`, role)
+				f.voter.callKey("POST", path+"/"+route, body, 403, key)
+				f.provider.mu.Lock()
+				defer f.provider.mu.Unlock()
+				if calls != f.provider.calls {
+					t.Fatal("recovery required Bitbucket")
+				}
+			})
+		}
+	}
+}
+
+func TestMilestone9ClockFaultAllowsIndependentStopAndEvidence(t *testing.T) {
+	for _, latched := range []bool{false, true} {
+		t.Run(fmt.Sprint(latched), func(t *testing.T) {
+			f := newExecutionFixture(t)
+			deployer(t, f)
+			f.prepare(t)
+			f.transition(t, "start-permission", f.request(t, 1, "init", ""), 200)
+			f.admin.call("POST", "/organizations/"+f.org+"/attempts/"+f.assignment.AttemptID+"/recovery", map[string]any{"expected_attempt_revision": attemptRevision(t, f)}, 200)
+			clk := &approvalClock{failed: true}
+			handler, _ := httpapi.NewWithOptions(f.db.App, origin, httpapi.Options{Clock: clk})
+			server := httptest.NewServer(handler)
+			defer server.Close()
+			c := &client{t: t, base: server.URL, token: f.admin.token, csrf: f.admin.csrf}
+			f.exec(t, `UPDATE cosmoformer.installation SET clock_unreliable=$1`, latched)
+			id := caseID(t, f)
+			c.call("PATCH", "/organizations/"+f.org+"/attempts/"+f.assignment.AttemptID+"/stop-proof", recoveryBody(attemptRevision(t, f), "host", "protected-independent-stop", false), 200)
+			path := recoveryPath(f, id)
+			r := c.call("GET", path, nil, 200)
+			r = c.call("PATCH", path+"/evidence", recoveryBody(r["revision"], "host", "protected-independent-stop", true), 200)
+			if r["stop_verified"] != true || r["reconciliation_complete"] != true {
+				t.Fatal(r)
+			}
+			var closed bool
+			var reservations, holds int
+			if err := f.db.Owner.QueryRow(context.Background(), `SELECT closed_at IS NOT NULL,(SELECT count(*) FROM cosmoformer.worker_reservations WHERE attempt_id=a.id)+(SELECT count(*) FROM cosmoformer.backend_reservations WHERE attempt_id=a.id),(SELECT count(*) FROM cosmoformer.artifact_holds WHERE owner_kind='recovery' AND owner_id=$2 AND released_at IS NULL) FROM cosmoformer.attempts a WHERE id=$1`, f.assignment.AttemptID, id).Scan(&closed, &reservations, &holds); err != nil || !closed || reservations != 0 || holds == 0 {
+				t.Fatal("stop proof did not preserve recovery disposition", closed, reservations, holds, err)
 			}
 		})
 	}

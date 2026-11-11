@@ -103,3 +103,12 @@ it('displays protected references only when included by the authorized response'
     mount({ ...recovery, own_counted: true, evidence: { stop_proof: { method: 'agent', statement: 'Agent proof matched.', protected_reference: 'protected-record' }, reconciliation: { complete: true, statement: 'Reconciled.', protected_references: ['protected-reconciliation'] } } });
     expect(screen.getByText('protected-record')).toBeVisible(); expect(screen.getByText('protected-reconciliation')).toBeVisible(); expect(screen.getByRole('button', { name: 'Approve recovery evidence' })).toBeDisabled();
 });
+it.each(['approval', 'clear'] as const)('shows trusted-clock rejection for recovery %s without retrying', async action => {
+    vi.mocked(fetch).mockImplementation(async (_p, options) => { mutations.push(options!); return reply({ code: 'CLOCK_UNRELIABLE', message: 'Trusted server time is unavailable. Approval is blocked.' }, 503); });
+    mount({ ...recovery, can_clear: true });
+    fireEvent.click(screen.getByRole('button', { name: action === 'clear' ? 'Clear recovery' : 'Approve recovery evidence' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm recovery action' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Trusted server time is unavailable.');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(mutations).toHaveLength(1); expect(reload).toHaveBeenCalledOnce(); expect(denied).not.toHaveBeenCalled();
+});
