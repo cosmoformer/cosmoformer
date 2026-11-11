@@ -110,7 +110,7 @@ func TestAgentRunMaintainsHeartbeatWhilePollingAndStops(t *testing.T) {
 				RequestID string `json:"request_id"`
 				Tick      int64  `json:"agent_tick"`
 			}
-			if e := json.NewDecoder(r.Body).Decode(&body); e != nil || body.WorkerID != workerID || body.Agent != agentID || body.Generation != 1 || body.Phase != "preflight" || body.Tick != 1000 || body.RequestID == "" {
+			if e := json.NewDecoder(r.Body).Decode(&body); e != nil || body.WorkerID != workerID || body.Agent != agentID || body.Generation != 1 || body.Phase != "supervising" || body.Tick != 1000 || body.RequestID == "" {
 				t.Error("heartbeat lost admitted identity or elapsed tick")
 			}
 			json.NewEncoder(w).Encode(map[string]any{"contact_received_at": time.Now(), "controls": []string{}, "paused": false})

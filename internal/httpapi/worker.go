@@ -78,9 +78,9 @@ type HeartbeatInput struct {
 }
 type HeartbeatOutput struct {
 	Body struct {
-		Contact  time.Time `json:"contact_received_at"`
-		Controls []string  `json:"controls"`
-		Paused   bool      `json:"paused"`
+		Contact  time.Time      `json:"contact_received_at"`
+		Controls []runs.Control `json:"controls"`
+		Paused   bool           `json:"paused"`
 	}
 }
 type TransitionInput struct {
@@ -224,10 +224,11 @@ func (a *Server) registerWorker(api huma.API) {
 		if in.Body.RequestID == "" {
 			return nil, problem(ctx, 422, "A request ID is required.")
 		}
-		e := a.Coordinator.Heartbeat(ctx, bearer(in.Authorization), in.Body.Identity)
+		controls, paused, e := a.Coordinator.Controls(ctx, bearer(in.Authorization), in.Body.Identity)
 		out := &HeartbeatOutput{}
 		out.Body.Contact = time.Now().UTC()
-		out.Body.Controls = []string{}
+		out.Body.Controls = controls
+		out.Body.Paused = paused
 		return out, workerError(ctx, e)
 	})
 	a.registerOrderedRoutes(api)

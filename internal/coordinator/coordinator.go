@@ -91,6 +91,7 @@ func (c *Coordinator) current(ctx context.Context, tx pgx.Tx, w Worker, id runs.
 }
 func (c *Coordinator) Admit(ctx context.Context, token string, in runs.Admission) (int64, error) {
 	var generation int64
+	var restarted bool
 	if in.Protocol != 1 || !catalog.UUID(in.WorkerID) || !catalog.UUID(in.Agent) || !catalog.UUID(in.RuntimeID) || in.ClockSource != "boottime" || !in.ClockOK || in.Arch != "amd64" || in.GitPackage != "1:2.47.3-0+deb13u1" || in.GitVersion != "git version 2.47.3" || !planningPhases(in.Phases) {
 		return 0, runs.Fail("RUNTIME_UNSUPPORTED")
 	}
@@ -125,7 +126,15 @@ func (c *Coordinator) Admit(ctx context.Context, token string, in runs.Admission
 				return runs.Fail("MESSAGE_CONFLICT")
 			}
 		} else {
-			if reserved || healthy {
+			if reserved {
+				var attempt string
+				if e = tx.QueryRow(ctx, `SELECT attempt_id::text FROM cosmoformer.worker_reservations WHERE worker_id=$1`, w.ID).Scan(&attempt); e != nil {
+					return e
+				}
+				restarted = true
+				return c.attention(ctx, tx, attempt)
+			}
+			if healthy {
 				return runs.Fail("WORKER_BUSY")
 			}
 			generation++
@@ -133,6 +142,9 @@ func (c *Coordinator) Admit(ctx context.Context, token string, in runs.Admission
 		_, e = tx.Exec(ctx, `UPDATE cosmoformer.workers SET generation=$2,agent_instance=$3,runtime_id=$4,capabilities=$5,last_contact_at=clock_timestamp(),revision=revision+1 WHERE id=$1`, w.ID, generation, in.Agent, in.RuntimeID, mustJSON(in))
 		return e
 	})
+	if e == nil && restarted {
+		e = runs.Fail("RECOVERY_REQUIRED")
+	}
 	return generation, e
 }
 func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }
@@ -222,7 +234,7 @@ func (c *Coordinator) Poll(ctx context.Context, token string, in runs.Poll) (*ru
 			}
 			for _, v := range all {
 				if e = c.authority(ctx, tx, v.OperationID, v.Spec); e != nil {
-					if errors.Is(e, store.ErrForbidden) || runs.Code(e) == "INPUTS_CHANGED" || runs.Code(e) == "SOURCE_CHANGED" {
+					if errors.Is(e, store.ErrForbidden) || runs.Code(e) == "INPUTS_CHANGED" || runs.Code(e) == "SOURCE_CHANGED" || runs.Code(e) == "RECOVERY_EVIDENCE_CHANGED" {
 						_, err := tx.Exec(ctx, `UPDATE cosmoformer.operations SET status='retired',terminal_reason='ELIGIBILITY_CHANGED',revision=revision+1 WHERE id=$1`, v.OperationID)
 						if err != nil {
 							return err
@@ -265,7 +277,7 @@ func (c *Coordinator) Poll(ctx context.Context, token string, in runs.Poll) (*ru
 					}
 					var targetID string
 					var busy bool
-					if e = tx.QueryRow(ctx, `SELECT target_id::text,EXISTS(SELECT FROM cosmoformer.backend_reservations WHERE target_id=b.target_id) OR EXISTS(SELECT FROM cosmoformer.recovery_cases WHERE target_id=b.target_id AND status='open') FROM cosmoformer.stack_bindings b WHERE stack_id=$1`, v.StackID).Scan(&targetID, &busy); e != nil {
+					if e = tx.QueryRow(ctx, `SELECT target_id::text,EXISTS(SELECT FROM cosmoformer.backend_reservations WHERE target_id=b.target_id) OR EXISTS(SELECT FROM cosmoformer.recovery_cases r WHERE target_id=b.target_id AND status='open' AND NOT EXISTS(SELECT FROM cosmoformer.operations o WHERE o.id=$2 AND o.recovery_case_id=r.id AND o.recovery_evidence_revision=r.evidence_revision AND r.stop_verified)) FROM cosmoformer.stack_bindings b WHERE stack_id=$1`, v.StackID, v.OperationID).Scan(&targetID, &busy); e != nil {
 						return e
 					}
 					if busy {
@@ -290,7 +302,7 @@ func (c *Coordinator) Poll(ctx context.Context, token string, in runs.Poll) (*ru
 					if e != nil {
 						return e
 					}
-					if tag, insertErr := tx.Exec(ctx, `INSERT INTO cosmoformer.plans(org_id,operation_id,attempt_id,stack_id,target_id,status,provenance,source_facts_revision,state_epoch,rule_version,profile_id) VALUES($1,$2,$3,$4,$5,'assembling','normal',$6,$7,$8,$9) ON CONFLICT(operation_id) DO UPDATE SET attempt_id=excluded.attempt_id,state_epoch=excluded.state_epoch,revision=cosmoformer.plans.revision+1 WHERE cosmoformer.plans.status='assembling' AND NOT EXISTS(SELECT FROM cosmoformer.attempts WHERE id=cosmoformer.plans.attempt_id AND ever_permitted)`, w.OrgID, v.OperationID, attempt, v.StackID, target, v.Spec.Source.FactsRevision, claimed.StateEpoch, v.Execution.RuleVersion, v.Execution.ProfileID); insertErr != nil {
+					if tag, insertErr := tx.Exec(ctx, `INSERT INTO cosmoformer.plans(org_id,operation_id,attempt_id,stack_id,target_id,status,provenance,source_facts_revision,state_epoch,rule_version,profile_id,recovery_case_id,recovery_evidence_revision) VALUES($1,$2,$3,$4,$5,'assembling',$10,$6,$7,$8,$9,$11,$12) ON CONFLICT(operation_id) DO UPDATE SET attempt_id=excluded.attempt_id,state_epoch=excluded.state_epoch,revision=cosmoformer.plans.revision+1 WHERE cosmoformer.plans.status='assembling' AND NOT EXISTS(SELECT FROM cosmoformer.attempts WHERE id=cosmoformer.plans.attempt_id AND ever_permitted)`, w.OrgID, v.OperationID, attempt, v.StackID, target, v.Spec.Source.FactsRevision, claimed.StateEpoch, v.Execution.RuleVersion, v.Execution.ProfileID, v.Execution.Provenance().Kind, nullable(v.Execution.Provenance().Case), nullableRevision(v.Execution.Provenance().Revision)); insertErr != nil {
 						return insertErr
 					} else if tag.RowsAffected() != 1 {
 						return runs.Fail("PLAN_NOT_ASSEMBLING")
@@ -376,9 +388,19 @@ func (c *Coordinator) remaining(ctx context.Context, tx pgx.Tx, a *runs.Assignme
 	return nil
 }
 func (c *Coordinator) authority(ctx context.Context, tx pgx.Tx, operation string, s runs.PreflightSpec) error {
+	if s.Recovery != nil {
+		var valid bool
+		if e := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM cosmoformer.operations o JOIN cosmoformer.recovery_cases r ON r.id=o.recovery_case_id WHERE o.id=$1 AND r.id=$2 AND o.stack_id=r.stack_id AND o.recovery_evidence_revision=$3 AND r.evidence_revision=$3 AND r.status='open' AND r.stop_verified)`, operation, s.Recovery.Case, s.Recovery.Revision).Scan(&valid); e != nil {
+			return e
+		}
+		if !valid {
+			return runs.Fail("RECOVERY_EVIDENCE_CHANGED")
+		}
+	}
+
 	var requester, project, env, repo string
 	var enabled bool
-	e := tx.QueryRow(ctx, `SELECT coalesce(o.requester_id::text,''),s.project_id::text,s.environment_id::text,s.repository_id::text,coalesce(cosmoformer.requester_enabled(o.requester_id),false) FROM cosmoformer.operations o JOIN cosmoformer.stacks s ON s.id=o.stack_id JOIN cosmoformer.repositories r ON r.id=s.repository_id WHERE o.id=$1 AND NOT s.archived AND r.enabled AND s.effective_revision_id=$2`, operation, s.StackRevisionID).Scan(&requester, &project, &env, &repo, &enabled)
+	e := tx.QueryRow(ctx, `SELECT coalesce(o.requester_id::text,''),s.project_id::text,s.environment_id::text,s.repository_id::text,coalesce(cosmoformer.requester_enabled(o.requester_id),false) FROM cosmoformer.operations o JOIN cosmoformer.stacks s ON s.id=o.stack_id JOIN cosmoformer.repositories r ON r.id=s.repository_id WHERE o.id=$1 AND NOT s.archived AND r.enabled AND s.effective_revision_id=$2 AND NOT (o.native_planning AND o.recovery_case_id IS NULL AND EXISTS(SELECT FROM cosmoformer.recovery_cases rc WHERE rc.stack_id=o.stack_id AND rc.status='cleared' AND o.accepted_at<=rc.cleared_at))`, operation, s.StackRevisionID).Scan(&requester, &project, &env, &repo, &enabled)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return runs.Fail("INPUTS_CHANGED")
 	}
@@ -607,7 +629,18 @@ func (c *Coordinator) Transition(ctx context.Context, token, route string, m run
 				return runs.Fail("INVALID_STATE")
 			}
 			out.AttemptState = "preparing"
+		case "controls/ack":
+			var p runs.ControlAck
+			if e = runs.Decode(m.Payload, &p); e != nil {
+				return e
+			}
+			if e = c.controlAck(ctx, tx, m, p); e != nil {
+				return e
+			}
 		case "prepare-result":
+			if e = c.canLaunch(ctx, tx, m.AttemptID, op); e != nil {
+				return e
+			}
 			var p runs.Prepare
 			if runs.Decode(m.Payload, &p) != nil || state != "preparing" || p.Phase != "preflight" || !p.NoStateChild || !p.Reaped || p.EverPermitted {
 				return runs.Fail("INVALID_STATE")
@@ -666,8 +699,15 @@ func (c *Coordinator) Transition(ctx context.Context, token, route string, m run
 			out.AttemptState = "ready"
 			out.Ready = true
 		case "result":
+			if state == "uncertain" {
+				return runs.Fail("INDEPENDENT_STOP_PROOF_REQUIRED")
+			}
+			var cancelled bool
+			if e = tx.QueryRow(ctx, `SELECT cancel_requested FROM cosmoformer.operations WHERE id=$1`, op).Scan(&cancelled); e != nil {
+				return e
+			}
 			var p runs.Result
-			if runs.Decode(m.Payload, &p) != nil || !p.NoStateChild || !p.Reaped || (p.Outcome != "success" && p.Outcome != "preparation_failed") {
+			if runs.Decode(m.Payload, &p) != nil || !p.NoStateChild || !p.Reaped || (p.Outcome != "success" && p.Outcome != "preparation_failed" && p.Outcome != "cancelled") {
 				return runs.Fail("INVALID_REQUEST")
 			}
 			switch p.Reason {
@@ -693,7 +733,7 @@ func (c *Coordinator) Transition(ctx context.Context, token, route string, m run
 			// explicit native intent can create the second phase.
 			nativeQueued := false
 			nativeBlocked := ""
-			if p.Outcome == "success" {
+			if p.Outcome == "success" && !cancelled {
 				var native bool
 				if e = tx.QueryRow(ctx, `SELECT native_planning FROM cosmoformer.operations WHERE id=$1`, op).Scan(&native); e != nil {
 					return e
@@ -739,6 +779,10 @@ func (c *Coordinator) Transition(ctx context.Context, token, route string, m run
 			if p.Outcome != "success" {
 				out.OperationStatus = "failed"
 				outcome = "preparation_failed"
+			}
+			if cancelled {
+				outcome = "cancelled"
+				out.OperationStatus = "cancelled"
 			}
 			if _, e = tx.Exec(ctx, `UPDATE cosmoformer.attempts SET state='terminal',outcome=$2,closed_at=clock_timestamp(),stop_proof=$3,revision=revision+1 WHERE id=$1`, m.AttemptID, outcome, mustJSON(p)); e != nil {
 				return e
@@ -790,6 +834,9 @@ func (c *Coordinator) Transition(ctx context.Context, token, route string, m run
 				if reason == "" {
 					reason = "PREPARATION_FAILED"
 				}
+			}
+			if cancelled {
+				reason = "CANCELLED"
 			}
 			if _, e = tx.Exec(ctx, `UPDATE cosmoformer.operations SET status=$2,terminal_reason=$3,revision=revision+1 WHERE id=$1`, op, out.OperationStatus, reason); e != nil {
 				return e

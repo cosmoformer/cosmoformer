@@ -13,7 +13,7 @@ import (
 
 func (c *Coordinator) preserveExecutionAttention(ctx context.Context, tx pgx.Tx, attempt string, out *runs.Transition) error {
 	var uncertain bool
-	if e := tx.QueryRow(ctx, `SELECT a.state='uncertain' OR EXISTS(SELECT FROM cosmoformer.recovery_cases WHERE target_id=a.target_id AND status='open') FROM cosmoformer.attempts a WHERE a.id=$1`, attempt).Scan(&uncertain); e != nil {
+	if e := tx.QueryRow(ctx, `SELECT a.state='uncertain' OR EXISTS(SELECT FROM cosmoformer.recovery_cases rc WHERE target_id=a.target_id AND status='open' AND NOT EXISTS(SELECT FROM cosmoformer.operations ro WHERE ro.id=a.operation_id AND ro.recovery_case_id=rc.id AND ro.recovery_evidence_revision=rc.evidence_revision)) FROM cosmoformer.attempts a WHERE a.id=$1`, attempt).Scan(&uncertain); e != nil {
 		return e
 	}
 	if uncertain {
@@ -127,8 +127,17 @@ func (c *Coordinator) commandEvent(ctx context.Context, tx pgx.Tx, a runs.Assign
 		if status != "issued" {
 			return true, nil
 		}
-		if p.PID != nil || p.PGID != nil || p.Exit != nil || p.Signal != nil || p.GroupEmpty != nil || p.Pipes != "" || p.ProofReason != "local_deadline_expired_discarded" {
+		if p.PID != nil || p.PGID != nil || p.Exit != nil || p.Signal != nil || p.GroupEmpty != nil || p.Pipes != "" || (p.ProofReason != "local_deadline_expired_discarded" && p.ProofReason != "local_cancel_discarded") {
 			return false, runs.Fail("NEVER_STARTED_PROOF_REQUIRED")
+		}
+		if p.ProofReason == "local_cancel_discarded" {
+			var cancelled bool
+			if e = tx.QueryRow(ctx, `SELECT cancel_requested FROM cosmoformer.operations WHERE id=$1`, a.OperationID).Scan(&cancelled); e != nil {
+				return false, e
+			}
+			if !cancelled {
+				return false, runs.Fail("CANCEL_EVIDENCE_REQUIRED")
+			}
 		}
 		// The exact same process permanently discards the single-use launch state.
 		// Local conservative expiry can precede the platform's display deadline.
@@ -215,7 +224,7 @@ func (c *Coordinator) executionResult(ctx context.Context, tx pgx.Tx, a runs.Ass
 		}
 	}
 	var uncertain, cancelled bool
-	if e = tx.QueryRow(ctx, `SELECT a.state='uncertain' OR EXISTS(SELECT FROM cosmoformer.recovery_cases WHERE target_id=a.target_id AND status='open'),o.cancel_requested FROM cosmoformer.attempts a JOIN cosmoformer.operations o ON o.id=a.operation_id WHERE a.id=$1`, m.AttemptID).Scan(&uncertain, &cancelled); e != nil {
+	if e = tx.QueryRow(ctx, `SELECT a.state='uncertain' OR EXISTS(SELECT FROM cosmoformer.recovery_cases rc WHERE target_id=a.target_id AND status='open' AND NOT EXISTS(SELECT FROM cosmoformer.operations ro WHERE ro.id=a.operation_id AND ro.recovery_case_id=rc.id AND ro.recovery_evidence_revision=rc.evidence_revision)),o.cancel_requested FROM cosmoformer.attempts a JOIN cosmoformer.operations o ON o.id=a.operation_id WHERE a.id=$1`, m.AttemptID).Scan(&uncertain, &cancelled); e != nil {
 		return false, e
 	}
 	if uncertain {
@@ -224,7 +233,7 @@ func (c *Coordinator) executionResult(ctx context.Context, tx pgx.Tx, a runs.Ass
 	if p.Outcome == "cancelled" && !cancelled {
 		return false, runs.Fail("CANCEL_EVIDENCE_REQUIRED")
 	}
-	if p.Outcome == "success" {
+	if p.Outcome == "success" && !cancelled {
 		if e = c.finalizePlan(ctx, tx, a, m, p, planning); e != nil {
 			return false, e
 		}
@@ -240,6 +249,9 @@ func (c *Coordinator) executionResult(ctx context.Context, tx pgx.Tx, a runs.Ass
 		return false, e
 	}
 	outcome := p.Outcome
+	if cancelled {
+		outcome = "cancelled"
+	}
 	if budgetInstance != c.Instance && outcome == "preparation_failed" {
 		outcome = "failure"
 	}
@@ -261,17 +273,20 @@ func (c *Coordinator) executionResult(ctx context.Context, tx pgx.Tx, a runs.Ass
 		return false, e
 	}
 	reason := "EXECUTION_FAILED"
-	if p.Outcome == "success" {
+	if outcome == "success" {
 		reason = "PLAN_READY"
 		if !planning.Analysis.Changes.HasChanges() {
 			reason = "NO_CHANGES"
 		}
 	}
-	if p.Outcome == "preparation_failed" {
+	if outcome == "preparation_failed" {
 		reason = "PREPARATION_FAILED"
 	}
-	if p.Outcome == "not_executed" {
+	if outcome == "not_executed" {
 		reason = "PERMISSION_NOT_EXECUTED"
+	}
+	if outcome == "cancelled" {
+		reason = "CANCELLED"
 	}
 	if budgetInstance != c.Instance {
 		reason = "ATTEMPT_BUDGET_INSTANCE_ENDED"
@@ -279,7 +294,7 @@ func (c *Coordinator) executionResult(ctx context.Context, tx pgx.Tx, a runs.Ass
 	if _, e = tx.Exec(ctx, `UPDATE cosmoformer.operations SET terminal_reason=$2 WHERE id=$1`, a.OperationID, reason); e != nil {
 		return false, e
 	}
-	if p.Outcome != "success" && p.Outcome != "preparation_failed" {
+	if outcome != "success" && outcome != "preparation_failed" {
 		if _, e = tx.Exec(ctx, `UPDATE cosmoformer.plans SET status='unsupported',invalidation_reason=$2,revision=revision+1 WHERE attempt_id=$1 AND status='assembling'`, m.AttemptID, reason); e != nil {
 			return false, e
 		}
@@ -289,10 +304,10 @@ func (c *Coordinator) executionResult(ctx context.Context, tx pgx.Tx, a runs.Ass
 	}
 	out.AttemptState = "terminal"
 	out.OperationStatus = "failed"
-	if p.Outcome == "success" {
+	if outcome == "success" {
 		out.OperationStatus = "succeeded"
 	}
-	if p.Outcome == "cancelled" {
+	if cancelled || outcome == "cancelled" {
 		out.OperationStatus = "cancelled"
 	}
 	return false, nil
@@ -324,12 +339,12 @@ func (c *Coordinator) executionLogFinal(ctx context.Context, tx pgx.Tx, attempt 
 }
 
 func (c *Coordinator) controlAck(ctx context.Context, tx pgx.Tx, m runs.Message, p runs.ControlAck) error {
-	if p.State != "delivered" && p.State != "observed" || p.Ordinal < 0 {
+	if p.State != "delivered" && p.State != "observed" || p.Ordinal < 0 || !catalog.UUID(p.ID) {
 		return runs.Fail("INVALID_REQUEST")
 	}
 	var kind, state string
 	var ordinal int64
-	e := tx.QueryRow(ctx, `SELECT kind,state,coalesce(command_ordinal,0) FROM cosmoformer.control_requests WHERE id=$1 AND attempt_id=$2`, p.ID, m.AttemptID).Scan(&kind, &state, &ordinal)
+	e := tx.QueryRow(ctx, `SELECT kind,state,coalesce(command_ordinal,0) FROM cosmoformer.control_requests WHERE id=$1 AND attempt_id=$2 AND worker_id=$3 AND generation=$4 AND agent_instance=$5`, p.ID, m.AttemptID, m.WorkerID, m.Generation, m.Agent).Scan(&kind, &state, &ordinal)
 	if e != nil || ordinal != p.Ordinal {
 		return runs.Fail("CONTROL_IDENTITY_MISMATCH")
 	}
@@ -372,6 +387,6 @@ func (c *Coordinator) controlAck(ctx context.Context, tx pgx.Tx, m runs.Message,
 			return runs.Fail("STOP_EVIDENCE_REQUIRED")
 		}
 	}
-	_, e = tx.Exec(ctx, `UPDATE cosmoformer.control_requests SET state=$2,observed_event_id=coalesce($3::uuid,observed_event_id),revision=revision+1 WHERE id=$1`, p.ID, p.State, nullable(eventRowID))
+	_, e = tx.Exec(ctx, `UPDATE cosmoformer.control_requests SET state=$2,observed_event_id=coalesce($3::uuid,observed_event_id),signal_sent=coalesce(signal_sent,$4::text),delivered_at=coalesce(delivered_at,clock_timestamp()),observed_at=CASE WHEN $2='observed' THEN coalesce(observed_at,clock_timestamp()) ELSE observed_at END,revision=revision+1 WHERE id=$1`, p.ID, p.State, nullable(eventRowID), nullable(p.Signal))
 	return e
 }

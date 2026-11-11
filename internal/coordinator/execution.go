@@ -369,7 +369,7 @@ func (c *Coordinator) executionReplay(ctx context.Context, token, route string, 
 		if e == nil {
 			if !identity.Equal(d, nativeMessageDigest(route, m, payload)) {
 				conflict = true
-				return c.attention(ctx, tx, m.AttemptID)
+				return c.conflictingAttention(ctx, tx, m.AttemptID)
 			}
 			out = &runs.Transition{}
 			if json.Unmarshal(b, out) != nil {
@@ -406,7 +406,7 @@ func (c *Coordinator) executionReplay(ctx context.Context, token, route string, 
 				return e
 			}
 			if conflict {
-				return c.attention(ctx, tx, m.AttemptID)
+				return c.conflictingAttention(ctx, tx, m.AttemptID)
 			}
 			return runs.Fail("ATTEMPT_CLOSED")
 		}
@@ -438,6 +438,12 @@ func (c *Coordinator) owns(ctx context.Context, tx pgx.Tx, w Worker, m runs.Mess
 	}
 	return nil
 }
+func (c *Coordinator) conflictingAttention(ctx context.Context, tx pgx.Tx, attempt string) error {
+	if _, e := tx.Exec(ctx, `UPDATE cosmoformer.attempts SET stop_conflicted=true WHERE id=$1`, attempt); e != nil {
+		return e
+	}
+	return c.attention(ctx, tx, attempt)
+}
 func (c *Coordinator) attention(ctx context.Context, tx pgx.Tx, attempt string) error {
 	// Contradictory late terminal facts preserve history but also open the
 	// target hold. A released old attempt must not silently authorize new work.
@@ -450,7 +456,7 @@ func (c *Coordinator) attention(ctx context.Context, tx pgx.Tx, attempt string) 
 }
 func (c *Coordinator) canLaunch(ctx context.Context, tx pgx.Tx, attempt, op string) error {
 	var cancelled, uncertain, held bool
-	e := tx.QueryRow(ctx, `SELECT o.cancel_requested OR EXISTS(SELECT FROM cosmoformer.control_requests WHERE attempt_id=a.id),a.state='uncertain',EXISTS(SELECT FROM cosmoformer.recovery_cases WHERE target_id=a.target_id AND status='open') FROM cosmoformer.attempts a JOIN cosmoformer.operations o ON o.id=a.operation_id WHERE a.id=$1 AND o.id=$2`, attempt, op).Scan(&cancelled, &uncertain, &held)
+	e := tx.QueryRow(ctx, `SELECT o.cancel_requested OR EXISTS(SELECT FROM cosmoformer.control_requests WHERE attempt_id=a.id),a.state='uncertain',EXISTS(SELECT FROM cosmoformer.recovery_cases rc WHERE target_id=a.target_id AND status='open' AND (o.recovery_case_id=rc.id AND o.recovery_evidence_revision=rc.evidence_revision AND rc.stop_verified) IS NOT TRUE) FROM cosmoformer.attempts a JOIN cosmoformer.operations o ON o.id=a.operation_id WHERE a.id=$1 AND o.id=$2`, attempt, op).Scan(&cancelled, &uncertain, &held)
 	if e != nil {
 		return e
 	}
@@ -624,7 +630,7 @@ func (c *Coordinator) executionTransition(ctx context.Context, token, route stri
 		if replayErr == nil {
 			if !identity.Equal(priorDigest, nativeMessageDigest(route, m, payload)) {
 				attention = true
-				return c.attention(ctx, tx, m.AttemptID)
+				return c.conflictingAttention(ctx, tx, m.AttemptID)
 			}
 			if e = json.Unmarshal(priorResponse, &out); e != nil {
 				return e
@@ -660,7 +666,7 @@ func (c *Coordinator) executionTransition(ctx context.Context, token, route stri
 				return e
 			}
 			if attention {
-				return c.attention(ctx, tx, m.AttemptID)
+				return c.conflictingAttention(ctx, tx, m.AttemptID)
 			}
 			return runs.Fail("ATTEMPT_CLOSED")
 		}
@@ -853,7 +859,7 @@ func (c *Coordinator) executionTransition(ctx context.Context, token, route stri
 			}
 			if conflict {
 				attention = true
-				return c.attention(ctx, tx, m.AttemptID)
+				return c.conflictingAttention(ctx, tx, m.AttemptID)
 			}
 			// Every late event may reconcile process facts, including identical
 			// observations, but only recovery clearance can remove attention.
@@ -876,7 +882,10 @@ func (c *Coordinator) executionTransition(ctx context.Context, token, route stri
 			}
 			if conflict {
 				attention = true
-				return c.attention(ctx, tx, m.AttemptID)
+				if p.Outcome == "unknown" {
+					return c.attention(ctx, tx, m.AttemptID)
+				}
+				return c.conflictingAttention(ctx, tx, m.AttemptID)
 			}
 		default:
 			return runs.Fail("COMMAND_UNSUPPORTED")
@@ -962,7 +971,7 @@ func (c *Coordinator) issuePermission(ctx context.Context, tx pgx.Tx, w Worker, 
 // ResolveExecutionSpec resolves metadata for an execution claim. It does
 // not create work, claim ownership, admit a worker or contact an AWS service.
 func ResolveExecutionSpec(ctx context.Context, tx pgx.Tx, p runs.PreflightSpec, b source.Backend) (runs.ExecutionSpec, error) {
-	s := runs.ExecutionSpec{Version: 1, Phase: "execution", StackRevisionID: p.StackRevisionID, Source: p.Source, Engine: p.Engine, Workspace: p.Workspace, VarFiles: p.VarFiles, BackendFiles: p.BackendFiles, Pool: p.Pool, Backend: b, AWS: runs.ExecutionAWS{AWSRef: p.AWS}, Secrets: p.Secrets, SourceCredentials: p.SourceCredentials, Grants: p.Grants, Review: p.Review, RuleVersion: p.RuleVersion, ProfileID: p.ProfileID}
+	s := runs.ExecutionSpec{Recovery: p.Recovery, Version: 1, Phase: "execution", StackRevisionID: p.StackRevisionID, Source: p.Source, Engine: p.Engine, Workspace: p.Workspace, VarFiles: p.VarFiles, BackendFiles: p.BackendFiles, Pool: p.Pool, Backend: b, AWS: runs.ExecutionAWS{AWSRef: p.AWS}, Secrets: p.Secrets, SourceCredentials: p.SourceCredentials, Grants: p.Grants, Review: p.Review, RuleVersion: p.RuleVersion, ProfileID: p.ProfileID}
 	e := tx.QueryRow(ctx, `SELECT expected_bootstrap_principal,session_seconds FROM cosmoformer.aws_connections WHERE id=$1 AND revision=$2 AND enabled`, p.AWS.ID, p.AWS.Revision).Scan(&s.AWS.Bootstrap, &s.AWS.SessionSeconds)
 	if e != nil {
 		return s, runs.Fail("AWS_EXECUTION_METADATA_REQUIRED")

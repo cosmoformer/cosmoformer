@@ -63,9 +63,12 @@ func (f *preflightFixture) requestNative(t *testing.T) map[string]any {
 	return f.admin.call("POST", "/organizations/"+f.org+"/stacks/"+f.stack+"/plans", map[string]any{"source": map[string]any{"kind": "branch"}, "priority": "medium", "intent": "native_plan"}, 200)
 }
 func TestNativePlanningJourneys(t *testing.T) {
-	for _, scenario := range []string{"no changes", "output only", "mutated init", "schema rejected", "nonzero exit", "process uncertain", "source advanced", "grant revoked", "missing evidence", "permission response lost", "expired launch"} {
+	for _, scenario := range []string{"no changes", "output only", "mutated init", "schema rejected", "nonzero exit", "process uncertain", "source advanced", "grant revoked", "missing evidence", "permission response lost", "expired launch", "expired at spawn", "cancel seal", "cancel finalization"} {
 		t.Run(scenario, func(t *testing.T) {
 			f := newPlanningFixture(t)
+			if strings.HasPrefix(scenario, "cancel ") {
+				f.exec(t, `INSERT INTO cosmoformer.grants(org_id,team_id,project_id,environment_id,role) SELECT org_id,team_id,project_id,environment_id,'deployer' FROM cosmoformer.grants WHERE role='planner' LIMIT 1`)
+			}
 			receipt := f.requestNative(t)
 			ctx := context.Background()
 			if e := f.agent.RunOne(ctx); e != nil {
@@ -87,6 +90,11 @@ func TestNativePlanningJourneys(t *testing.T) {
 				})
 			}
 			f.agent.Native = func(ctx context.Context, in worker.NativeCommand, spawn func(runs.CommandEvent) error) (runs.CommandEvent, error) {
+				if scenario == "expired at spawn" {
+					f.ticks.mu.Lock()
+					f.ticks.tick += 20 * time.Second
+					f.ticks.mu.Unlock()
+				}
 				if e := in.Start(func() error { return nil }); e != nil {
 					return runs.CommandEvent{}, e
 				}
@@ -116,6 +124,14 @@ func TestNativePlanningJourneys(t *testing.T) {
 				}
 				switch in.Descriptor.Command {
 				case "init":
+					if scenario == "cancel seal" {
+						var attempt string
+						var revision int64
+						if e := f.db.Owner.QueryRow(ctx, `SELECT a.id::text,a.revision FROM cosmoformer.attempts a JOIN cosmoformer.work_items w ON w.id=a.work_item_id WHERE a.operation_id=$1 AND w.phase='execution'`, receipt["operation_id"]).Scan(&attempt, &revision); e != nil {
+							t.Fatal(e)
+						}
+						f.admin.call("POST", "/organizations/"+f.org+"/attempts/"+attempt+"/cancel", map[string]any{"expected_attempt_revision": revision}, 202)
+					}
 					if scenario == "mutated init" {
 						if e := os.WriteFile(filepath.Join(in.Dir, "main.tf"), []byte("mutated"), 0600); e != nil {
 							t.Fatal(e)
@@ -138,6 +154,14 @@ func TestNativePlanningJourneys(t *testing.T) {
 						}
 					}
 				case "show":
+					if scenario == "cancel finalization" {
+						var attempt string
+						var revision int64
+						if e := f.db.Owner.QueryRow(ctx, `SELECT a.id::text,a.revision FROM cosmoformer.attempts a JOIN cosmoformer.work_items w ON w.id=a.work_item_id WHERE a.operation_id=$1 AND w.phase='execution'`, receipt["operation_id"]).Scan(&attempt, &revision); e != nil {
+							t.Fatal(e)
+						}
+						f.admin.call("POST", "/organizations/"+f.org+"/attempts/"+attempt+"/cancel", map[string]any{"expected_attempt_revision": revision}, 202)
+					}
 					if scenario == "source advanced" {
 						f.remote.mu.Lock()
 						f.remote.commit = strings.Repeat("b", 40)
@@ -197,6 +221,16 @@ func TestNativePlanningJourneys(t *testing.T) {
 			}
 			if workerHolds != 0 || backendHolds != 0 {
 				t.Fatal("positively stopped work retained temporary reservations", status)
+			}
+			if strings.HasPrefix(scenario, "cancel ") {
+				if status != "cancelled" || reason != "CANCELLED" || ready != 0 {
+					t.Fatal("cancelled finalization produced a deployable plan", status, reason, ready)
+				}
+				var plans int
+				if e := f.db.Owner.QueryRow(ctx, `SELECT count(*) FROM cosmoformer.plans WHERE operation_id=$1 AND status='unsupported'`, receipt["operation_id"]).Scan(&plans); e != nil || plans != 1 {
+					t.Fatal("cancelled plan evidence was not retired", plans, e)
+				}
+				return
 			}
 			if scenario != "no changes" && scenario != "output only" {
 				if status != "failed" || ready != 0 {

@@ -74,6 +74,12 @@ type RunsOutput struct {
 	}
 }
 type AttemptPublic struct {
+	Revision       int64           `json:"revision,omitempty"`
+	Ordinal        int64           `json:"command_ordinal,omitempty"`
+	CanControl     bool            `json:"can_control,omitempty"`
+	ContactWarning bool            `json:"contact_warning,omitempty"`
+	Controls       []ControlPublic `json:"controls,omitempty"`
+
 	ID        string     `json:"id" format:"uuid"`
 	Phase     string     `json:"phase" enum:"preflight,execution"`
 	State     string     `json:"state"`
@@ -93,6 +99,7 @@ type RunReadInput struct {
 }
 type RunOutput struct {
 	Body struct {
+		Recovery      *RecoveryPublic  `json:"recovery,omitempty"`
 		Run           RunPublic        `json:"run"`
 		AttemptsNext  string           `json:"attempts_next,omitempty"`
 		ArtifactsNext string           `json:"raw_artifacts_next,omitempty"`
@@ -236,6 +243,30 @@ func (a *Server) registerWorkspace(api huma.API) {
 				out.Body.AttemptsNext = out.Body.Attempts[99].ID
 			}
 			slices.Reverse(out.Body.Attempts)
+			for i := range out.Body.Attempts {
+				v := &out.Body.Attempts[i]
+				if err = tx.QueryRow(ctx, `SELECT a.revision,a.command_ordinal,a.closed_at IS NULL,coalesce(w.last_contact_at<clock_timestamp()-interval '30 seconds',true) AND a.closed_at IS NULL FROM cosmoformer.attempts a JOIN cosmoformer.workers w ON w.id=a.worker_id WHERE a.id=$1`, v.ID).Scan(&v.Revision, &v.Ordinal, &v.CanControl, &v.ContactWarning); err != nil {
+					return err
+				}
+				v.CanControl = v.CanControl && access.Allows(grants, out.Body.Run.ProjectID, out.Body.Run.EnvironmentID, access.Apply)
+				v.Controls, err = readControls(ctx, tx, v.ID)
+				if err != nil {
+					return err
+				}
+			}
+			var recoveryID string
+			err = tx.QueryRow(ctx, `SELECT r.id::text FROM cosmoformer.recovery_cases r WHERE r.stack_id=$1 AND (r.status='open' OR r.origin_attempt_id IN(SELECT id FROM cosmoformer.attempts WHERE operation_id=$2) OR r.id=(SELECT recovery_case_id FROM cosmoformer.operations WHERE id=$2)) ORDER BY r.opened_at DESC LIMIT 1`, out.Body.Run.StackID, out.Body.Run.OperationID).Scan(&recoveryID)
+			if err != nil && err != pgx.ErrNoRows {
+				return err
+			}
+			if recoveryID != "" {
+				rc, e := recoveryFor(ctx, tx, actor, recoveryID, access.View)
+				if e != nil {
+					return e
+				}
+				out.Body.Recovery = &rc.RecoveryPublic
+			}
+
 			if !out.Body.CanReadRaw {
 				return nil
 			}

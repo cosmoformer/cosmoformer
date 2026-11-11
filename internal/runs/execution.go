@@ -15,6 +15,7 @@ import (
 // ExecutionSpec is resolved input authority, never a command or environment map.
 // PreflightSpec remains a distinct source-only wire type.
 type ExecutionSpec struct {
+	Recovery          *Provenance        `json:"recovery,omitempty"`
 	Version           int                `json:"version"`
 	Phase             string             `json:"phase"`
 	StackRevisionID   string             `json:"stack_revision_id"`
@@ -47,7 +48,7 @@ type RetainedPlan struct {
 }
 
 func (s ExecutionSpec) Preflight() PreflightSpec {
-	return PreflightSpec{Version: s.Version, Phase: "preflight", StackRevisionID: s.StackRevisionID, Source: s.Source, Engine: s.Engine, Workspace: s.Workspace, BackendOwnerAccountID: s.Backend.ExpectedOwner, VarFiles: s.VarFiles, BackendFiles: s.BackendFiles, Pool: s.Pool, Secrets: s.Secrets, SourceCredentials: s.SourceCredentials, Grants: s.Grants, Review: s.Review, RuleVersion: s.RuleVersion, ProfileID: s.ProfileID, AWS: s.AWS.AWSRef, ExpectedBinding: &s.Backend}
+	return PreflightSpec{Recovery: s.Recovery, Version: s.Version, Phase: "preflight", StackRevisionID: s.StackRevisionID, Source: s.Source, Engine: s.Engine, Workspace: s.Workspace, BackendOwnerAccountID: s.Backend.ExpectedOwner, VarFiles: s.VarFiles, BackendFiles: s.BackendFiles, Pool: s.Pool, Secrets: s.Secrets, SourceCredentials: s.SourceCredentials, Grants: s.Grants, Review: s.Review, RuleVersion: s.RuleVersion, ProfileID: s.ProfileID, AWS: s.AWS.AWSRef, ExpectedBinding: &s.Backend}
 }
 
 var hex64 = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -63,6 +64,9 @@ func Digest(v any) string {
 	return hex.EncodeToString(h[:])
 }
 func (s ExecutionSpec) Validate() error {
+	if s.Recovery != nil && (s.Recovery.Kind != "recovery" || !catalog.UUID(s.Recovery.Case) || s.Recovery.Revision < 1) {
+		return Fail("INVALID_SPEC")
+	}
 	if s.Version != 1 || s.Phase != "execution" || !catalog.UUID(s.StackRevisionID) || !catalog.UUID(s.Source.RepositoryID) || !catalog.UUID(s.Source.SubjectID) || !commit40.MatchString(s.Source.Commit) || s.Source.FactsRevision < 1 || !catalog.RepoPath(s.Source.Root) || !catalog.UUID(s.Engine.ID) || s.Engine.Arch != "amd64" || !strings.HasPrefix(s.Engine.ImageDigest, "sha256:") || !ValidDigest(strings.TrimPrefix(s.Engine.ImageDigest, "sha256:")) || !catalog.UUID(s.Pool.ID) || s.Pool.GrantRevision < 1 || s.AWS.SessionSeconds != 3600 || s.AWS.Bootstrap == "" || !catalog.UUID(s.AWS.ID) || s.AWS.Revision < 1 || s.Review.Minimum < 1 || s.Review.Minimum > 100 || s.Review.Revision < 1 || s.RuleVersion == "" || s.ProfileID == "" || s.Workspace == "" {
 		return Fail("INVALID_SPEC")
 	}
