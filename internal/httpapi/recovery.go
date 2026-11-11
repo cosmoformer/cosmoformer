@@ -110,8 +110,9 @@ func recoveryFor(ctx context.Context, tx pgx.Tx, actor store.Actor, id string, a
 
 // Recovery receipts retain only immutable event identity. Replays project the
 // subject again under current grants, evidence and policy, never a cached DTO.
-func mutateRecovery(a *Server, ctx context.Context, org, id string, action access.Action, fn func(pgx.Tx, store.Actor) (*RecoveryOutput, error)) (*RecoveryOutput, error) {
+func mutateRecovery(a *Server, ctx context.Context, org, id string, action access.Action, positive bool, fn func(pgx.Tx, store.Actor) (*RecoveryOutput, error)) (*RecoveryOutput, error) {
 	var out *RecoveryOutput
+	var denied error
 	e := a.tx(ctx, org, func(tx pgx.Tx, actor store.Actor) error {
 		r, e := recoveryFor(ctx, tx, actor, id, action)
 		if e != nil {
@@ -128,6 +129,23 @@ func mutateRecovery(a *Server, ctx context.Context, org, id string, action acces
 			}
 			return nil
 		}
+		// Only fresh positive authority needs trusted time. Authorization and
+		// successful replay precede this check; evidence remains available.
+		if positive {
+			tick, err := a.Coordinator.Clock.Now()
+			if err != nil {
+				return approvalProblem(ctx, "CLOCK_UNRELIABLE")
+			}
+			var good bool
+			if err = tx.QueryRow(ctx, `SELECT cosmoformer.execution_clock_observe($1,$2)`, a.Coordinator.Instance, int64(tick)).Scan(&good); err != nil {
+				return err
+			}
+			if !good {
+				// Commit the detected discrepancy without any mutation or receipt.
+				denied = approvalProblem(ctx, "CLOCK_UNRELIABLE")
+				return nil
+			}
+		}
 		out, e = fn(tx, actor)
 		if e != nil {
 			return e
@@ -140,7 +158,13 @@ func mutateRecovery(a *Server, ctx context.Context, org, id string, action acces
 		_, e = tx.Exec(ctx, `SELECT cosmoformer.save_browser_request($1,$2,$3,$4::jsonb,false)`, actor.ID, d.Key, d.Digest, string(raw))
 		return e
 	})
-	return out, e
+	if e != nil {
+		return nil, e
+	}
+	if denied != nil {
+		return nil, denied
+	}
+	return out, nil
 }
 
 func (a *Server) registerRecovery(api huma.API) {
@@ -170,7 +194,7 @@ func (a *Server) registerRecovery(api huma.API) {
 		})
 	})
 	register(api, "PATCH", "/organizations/{org}/recoveries/{id}/evidence", "recovery-evidence", func(ctx context.Context, in *RecoveryInput) (*RecoveryOutput, error) {
-		return mutateRecovery(a, ctx, in.Org, in.ID, access.Apply, func(tx pgx.Tx, actor store.Actor) (*RecoveryOutput, error) {
+		return mutateRecovery(a, ctx, in.Org, in.ID, access.Apply, false, func(tx pgx.Tx, actor store.Actor) (*RecoveryOutput, error) {
 			r, e := recoveryFor(ctx, tx, actor, in.ID, access.Apply)
 			if e != nil {
 				return nil, e
@@ -215,7 +239,7 @@ func (a *Server) registerRecovery(api huma.API) {
 		})
 	})
 	register(api, "POST", "/organizations/{org}/recoveries/{id}/approvals", "approve-recovery", func(ctx context.Context, in *RecoveryRevisionInput) (*RecoveryOutput, error) {
-		return mutateRecovery(a, ctx, in.Org, in.ID, access.Approve, func(tx pgx.Tx, actor store.Actor) (*RecoveryOutput, error) {
+		return mutateRecovery(a, ctx, in.Org, in.ID, access.Approve, true, func(tx pgx.Tx, actor store.Actor) (*RecoveryOutput, error) {
 			r, e := recoveryFor(ctx, tx, actor, in.ID, access.Approve)
 			if e != nil {
 				return nil, e
@@ -239,7 +263,7 @@ func (a *Server) registerRecovery(api huma.API) {
 		})
 	})
 	register(api, "POST", "/organizations/{org}/recoveries/{id}/clear", "clear-recovery", func(ctx context.Context, in *RecoveryRevisionInput) (*RecoveryOutput, error) {
-		return mutateRecovery(a, ctx, in.Org, in.ID, access.Apply, func(tx pgx.Tx, actor store.Actor) (*RecoveryOutput, error) {
+		return mutateRecovery(a, ctx, in.Org, in.ID, access.Apply, true, func(tx pgx.Tx, actor store.Actor) (*RecoveryOutput, error) {
 			r, e := recoveryFor(ctx, tx, actor, in.ID, access.Apply)
 			if e != nil {
 				return nil, e
