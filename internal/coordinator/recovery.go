@@ -9,9 +9,11 @@ import (
 
 // ProtocolStopped accepts only positive facts already reconciled by this exact
 // agent's ordered protocol. Issued/lost-response permissions remain unresolved.
+// A manual closure also stores stop_proof, but never an accepted native result
+// digest; it must not be promoted to agent authority when no permits exist.
 func ProtocolStopped(ctx context.Context, tx pgx.Tx, attempt string) (bool, error) {
 	var proven bool
-	e := tx.QueryRow(ctx, `SELECT NOT stop_conflicted AND (closed_at IS NOT NULL AND stop_proof IS NOT NULL OR ever_permitted AND EXISTS(SELECT FROM cosmoformer.start_permissions WHERE attempt_id=a.id)) AND NOT EXISTS(SELECT FROM cosmoformer.start_permissions p WHERE p.attempt_id=a.id AND (p.status NOT IN ('stopped','not_executed') OR p.stop_facts IS NULL OR p.status='stopped' AND (p.stop_facts->>'event'<>'stopped' OR p.stop_facts->>'group_empty'<>'true' OR p.stop_facts->>'pipes' NOT IN ('drained','gapped')))) FROM cosmoformer.attempts a WHERE id=$1`, attempt).Scan(&proven)
+	e := tx.QueryRow(ctx, `SELECT NOT stop_conflicted AND (closed_at IS NOT NULL AND stop_proof IS NOT NULL AND result_digest IS NOT NULL OR ever_permitted AND EXISTS(SELECT FROM cosmoformer.start_permissions WHERE attempt_id=a.id)) AND NOT EXISTS(SELECT FROM cosmoformer.start_permissions p WHERE p.attempt_id=a.id AND (p.status NOT IN ('stopped','not_executed') OR p.stop_facts IS NULL OR p.status='stopped' AND (p.stop_facts->>'event'<>'stopped' OR p.stop_facts->>'group_empty'<>'true' OR p.stop_facts->>'pipes' NOT IN ('drained','gapped')))) FROM cosmoformer.attempts a WHERE id=$1`, attempt).Scan(&proven)
 	return proven, e
 }
 

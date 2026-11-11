@@ -189,3 +189,60 @@ func TestReapedLeaderRetiresSignalCapabilityWithoutStopProof(t *testing.T) {
 		t.Fatal("unproven descendant was automatically killed")
 	}
 }
+
+func TestLateForceStopAfterDeadlineRetainsExactCompletion(t *testing.T) {
+	id := runs.Identity{WorkerID: runs.ID(), Generation: 1, Agent: runs.ID()}
+	attempt := runs.ID()
+	s := newSupervisor(id, attempt)
+	ctx, cancel := context.WithCancel(withSupervisor(context.Background(), s))
+	defer cancel()
+	file := filepath.Join(t.TempDir(), "late-events")
+	exe, _ := os.Executable()
+	spawned := make(chan runs.CommandEvent, 1)
+	type outcome struct {
+		stop runs.CommandEvent
+		err  error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		stop, e := runNative(ctx, NativeCommand{Start: func(fn func() error) error { return fn() }, Program: exe, Args: []string{"-test.run=^TestControlledProcessFixture$"}, Env: []string{"COSMOFORMER_CONTROL_CHILD=1", "COSMOFORMER_CONTROL_FILE=" + file}, Permission: runs.Permission{ID: runs.ID(), Ordinal: 1}, Logs: NewLogCapture(&evidence.Registry{})}, func(e runs.CommandEvent) error { spawned <- e; return nil })
+		done <- outcome{stop, e}
+	}()
+	event := <-spawned
+	t.Cleanup(func() { syscall.Kill(-int(*event.PGID), syscall.SIGKILL) })
+	until := time.Now().Add(5 * time.Second)
+	for {
+		if _, e := os.Stat(file); e == nil {
+			break
+		}
+		if time.Now().After(until) {
+			t.Fatal("fixture not ready")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	select {
+	case got := <-done:
+		t.Fatal("deadline abandoned exact completion", got)
+	case <-time.After(2200 * time.Millisecond):
+	}
+	if syscall.Kill(int(*event.PID), 0) != nil {
+		t.Fatal("deadline killed the child")
+	}
+	raw, _ := os.ReadFile(file)
+	if strings.Count(string(raw), "interrupt") != 1 {
+		t.Fatal("deadline did not interrupt exactly once", string(raw))
+	}
+	ack, e := s.apply(runs.Control{ID: runs.ID(), Attempt: attempt, Worker: id.WorkerID, Generation: id.Generation, Agent: id.Agent, Ordinal: 1, Kind: "force_stop"})
+	if e != nil || ack.Signal != "SIGKILL" {
+		t.Fatal("late explicit force stop not delivered", ack, e)
+	}
+	select {
+	case got := <-done:
+		if got.err != nil || got.stop.Event != "stopped" || got.stop.GroupEmpty == nil || !*got.stop.GroupEmpty || got.stop.Pipes != "drained" || got.stop.Signal == nil || *got.stop.Signal != int(syscall.SIGKILL) {
+			t.Fatal("late force stop lost positive facts", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("late stop evidence not returned")
+	}
+}

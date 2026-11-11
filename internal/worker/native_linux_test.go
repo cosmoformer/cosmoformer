@@ -64,7 +64,7 @@ func TestNativeSupervisorChild(t *testing.T) {
 	os.Exit(0)
 }
 func TestNativeSupervisorExactStopAndBoundedRawOutput(t *testing.T) {
-	for _, mode := range []string{"done", "graceful", "ignore", "overflow", "detached", "survivor", "delay"} {
+	for _, mode := range []string{"done", "graceful", "overflow", "detached", "survivor", "delay"} {
 		t.Run(mode, func(t *testing.T) {
 			executable, e := os.Executable()
 			if e != nil {
@@ -83,7 +83,7 @@ func TestNativeSupervisorExactStopAndBoundedRawOutput(t *testing.T) {
 			defer file.Close()
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			if mode == "graceful" || mode == "ignore" {
+			if mode == "graceful" {
 				timer := time.AfterFunc(300*time.Millisecond, cancel)
 				defer timer.Stop()
 			}
@@ -112,16 +112,6 @@ func TestNativeSupervisorExactStopAndBoundedRawOutput(t *testing.T) {
 				defer syscall.Kill(child, syscall.SIGKILL)
 				if e != source.ErrProcess || stop.Pipes != "gapped" {
 					t.Fatal("unaccounted inherited writer proved stopped", stop, e)
-				}
-				return
-			}
-			if mode == "ignore" {
-				defer syscall.Kill(-int(*spawned.PGID), syscall.SIGKILL) // explicit fixture cleanup only
-				if e != source.ErrProcess || stop.Event == "stopped" {
-					t.Fatal("elapsed deadline claimed stop", stop, e)
-				}
-				if syscall.Kill(int(*spawned.PID), 0) != nil {
-					t.Fatal("deadline implicitly killed native child")
 				}
 				return
 			}

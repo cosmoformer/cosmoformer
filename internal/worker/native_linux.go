@@ -104,12 +104,11 @@ func runNative(ctx context.Context, in NativeCommand, spawn func(runs.CommandEve
 	case completed = <-wait:
 	case <-ctx.Done():
 		s.interrupt()
-		select {
-		case completed = <-wait:
-		case <-time.After(2 * time.Second):
-			<-reported // finish the sole ordered writer before returning
-			return event, source.ErrProcess
-		}
+		// The elapsed cap requests SIGINT, but does not end ownership of a
+		// live child. Keep the exact completion consumer so a later explicit
+		// Force Stop can still yield truthful stop evidence. Heartbeat delivery
+		// remains active; no replacement command or automatic SIGKILL is issued.
+		completed = <-wait
 	}
 	stopped := event
 	stopped.Event = "stopped"

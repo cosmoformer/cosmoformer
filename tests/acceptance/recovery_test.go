@@ -601,3 +601,52 @@ func TestMilestone9RecoveryPositiveAuthorityRespectsInstallationGate(t *testing.
 		r = f.voter.call("GET", path, nil, 200)
 	}
 }
+
+func TestMilestone9ManualStopCannotBecomeAgentAuthority(t *testing.T) {
+	for _, method := range []string{"host", "operator", "protocol"} {
+		t.Run(method, func(t *testing.T) {
+			f := newExecutionFixture(t)
+			deployer(t, f)
+			if method == "protocol" {
+				prepared := f.prepare(t)
+				f.transition(t, "result", runs.ExecutionResult{Outcome: "preparation_failed", Commands: []runs.CommandResult{}, Artifacts: []string{prepared.Artifact}, PreInitDigest: prepared.Digest, NoStateChild: true, Reaped: true}, 200)
+			}
+			f.admin.call("POST", "/organizations/"+f.org+"/attempts/"+f.assignment.AttemptID+"/recovery", map[string]any{"expected_attempt_revision": attemptRevision(t, f)}, 200)
+			path := recoveryPath(f, caseID(t, f))
+			r := f.admin.call("GET", path, nil, 200)
+			if method != "protocol" {
+				r = f.admin.call("PATCH", path+"/evidence", recoveryBody(r["revision"], method, "protected-manual-proof", true), 200)
+				if r["stop_authority"] != "manual_"+method {
+					t.Fatal("manual proof mislabeled", r)
+				}
+				var stored string
+				var hasDigest bool
+				if e := f.db.Owner.QueryRow(context.Background(), `SELECT stop_proof->>'method',result_digest IS NOT NULL FROM cosmoformer.attempts WHERE id=$1`, f.assignment.AttemptID).Scan(&stored, &hasDigest); e != nil || stored != method || hasDigest {
+					t.Fatal("manual closure fabricated protocol facts", stored, hasDigest, e)
+				}
+			}
+			status := 409
+			if method == "protocol" {
+				status = 200
+			}
+			out := f.admin.call("PATCH", path+"/evidence", recoveryBody(r["revision"], "agent", f.assignment.AttemptID, true), status)
+			if method == "protocol" {
+				if out["stop_authority"] != "agent_protocol" {
+					t.Fatal("positive zero-permit native result rejected", out)
+				}
+			} else {
+				if out["code"] != "INDEPENDENT_STOP_PROOF_REQUIRED" {
+					t.Fatal(out)
+				}
+				current := f.admin.call("GET", path, nil, 200)
+				if current["revision"] != r["revision"] || current["evidence_revision"] != r["evidence_revision"] || current["stop_authority"] != "manual_"+method {
+					t.Fatal("rejected relabel changed evidence", current)
+				}
+				var versions int
+				if e := f.db.Owner.QueryRow(context.Background(), `SELECT count(*) FROM cosmoformer.recovery_evidence_versions WHERE authority='agent_protocol'`).Scan(&versions); e != nil || versions != 0 {
+					t.Fatal("fabricated protocol history", versions, e)
+				}
+			}
+		})
+	}
+}
