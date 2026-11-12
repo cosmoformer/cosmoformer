@@ -100,6 +100,11 @@ func TestGitUsesExactCommitAndFixedConfiguration(t *testing.T) {
 	}
 	all := ""
 	for _, c := range calls {
+		for _, required := range []string{"maintenance.auto=false", "gc.auto=0"} {
+			if !strings.Contains(strings.Join(c, " "), "-c "+required) {
+				t.Fatal("Git command permits background maintenance", c)
+			}
+		}
 		all += strings.Join(c, " ") + "\n"
 	}
 	for _, required := range []string{"protocol.allow=never", "core.hooksPath=/dev/null", "http.followRedirects=false", "credential.useHttpPath=true", "--no-tags", "--detach " + commit} {

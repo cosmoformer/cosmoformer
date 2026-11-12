@@ -28,6 +28,8 @@ func TestRealGitExactCheckoutOverLocalHTTPS(t *testing.T) {
 	env := []string{"PATH=/usr/bin:/bin", "HOME=" + dir, "LANG=C.UTF-8", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0"}
 	run := func(cwd string, args ...string) []byte {
 		t.Helper()
+		// Fixture commits must obey the same no-background-work rule as checkouts.
+		args = append([]string{"-c", "maintenance.auto=false", "-c", "gc.auto=0"}, args...)
 		b, e := RunGit(ctx, cwd, args, env)
 		if e != nil {
 			t.Fatal("fixture Git command failed", args[0], e)

@@ -42,7 +42,9 @@ func (g Git) Checkout(ctx context.Context, root, repo, commit, credentialContext
 	if credentialContext != "" {
 		env = append(env, "COSMOFORMER_GIT_CONTEXT="+credentialContext)
 	}
-	fixed := []string{"-c", "core.hooksPath=/dev/null", "-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "-c", "http.followRedirects=false", "-c", "credential.useHttpPath=true", "-c", "credential.helper=", "-c", "filter.lfs.required=false", "-c", "filter.lfs.smudge=", "-c", "submodule.recurse=false"}
+	// Automatic maintenance may detach descendants after Git exits. Every
+	// supervised checkout command must finish without background work.
+	fixed := []string{"-c", "maintenance.auto=false", "-c", "gc.auto=0", "-c", "core.hooksPath=/dev/null", "-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "-c", "http.followRedirects=false", "-c", "credential.useHttpPath=true", "-c", "credential.helper=", "-c", "filter.lfs.required=false", "-c", "filter.lfs.smudge=", "-c", "submodule.recurse=false"}
 	if credentialContext != "" {
 		if !filepath.IsAbs(g.Helper) || strings.ContainsAny(g.Helper, " \t\r\n\"'`$\\") {
 			return ErrSource
