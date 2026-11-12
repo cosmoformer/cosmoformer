@@ -33,6 +33,7 @@ vi.mock('../../../scripts/workflow-lib.mjs', () => ({ root: '/fixture', dev: '/f
         if (label === 'test-db' && f.fail !== label) {
             const dir = options.env.COSMOFORMER_TEST_DIR;
             f.files.set(dir + '/owner.dsn', 'synthetic-owner-dsn');
+            f.files.set(dir + '/container', '  synthetic-owned-container\n');
             f.files.set(dir + '/container-intent.json', 'synthetic-record');
         }
         if (label === 'web')
@@ -122,6 +123,9 @@ it.each(['port', 'socket', 'lock', 'build', 'setup'])('reports %s failure and cl
 it.each(['', 'test-db'])('isolates integration controls and cleans startup receipts after %s', async (failure) => {
     vi.stubEnv('COSMOFORMER_DATABASE_DSN_FILE', 'must-not-use');
     vi.stubEnv('COSMOFORMER_MIGRATION_DSN_FILE', 'must-not-use');
+    vi.stubEnv('COSMOFORMER_TEST_OWNER_DSN', 'stale-owner-dsn');
+    vi.stubEnv('COSMOFORMER_TEST_MARKER_FILE', 'stale-marker');
+    vi.stubEnv('COSMOFORMER_TEST_PG_CONTAINER', 'stale-container');
     vi.stubEnv('TEST_ARGS', "-run 'TestOne|TestTwo'");
     f.fail = failure;
     // Model response loss after the startup intent became durable.
@@ -136,6 +140,8 @@ it.each(['', 'test-db'])('isolates integration controls and cleans startup recei
         const make = f.calls.find(c => c.command === 'make');
         expect(make.args).toEqual(['test-integration', "TEST_ARGS=-run 'TestOne|TestTwo'"]);
         expect(make.options.env.COSMOFORMER_TEST_OWNER_DSN).toBe('synthetic-owner-dsn');
+        expect(make.options.env.COSMOFORMER_TEST_MARKER_FILE).toBe('/fixture/.build/test-runs/run-fixture/marker');
+        expect(make.options.env.COSMOFORMER_TEST_PG_CONTAINER).toBe('synthetic-owned-container');
     }
     expect([...f.files.keys()].some(p => p.startsWith('/fixture/.build/test-runs/'))).toBe(false);
 });

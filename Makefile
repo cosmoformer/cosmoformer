@@ -124,7 +124,7 @@ test-native:
 
 test-scripts:
 	mkdir -p .build/coverage/workflows
-	COSMOFORMER_GO=$(GO) $(NODE) --test --experimental-test-coverage --test-coverage-include='scripts/*.mjs' --test-coverage-exclude='scripts/*.test.mjs' --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=.build/coverage/workflows/lcov.info scripts/check-go-coverage.test.mjs scripts/overall-coverage.test.mjs scripts/sonar-coverage.test.mjs scripts/merge-go-coverage.test.mjs scripts/ci-checks.test.mjs scripts/native-make.test.mjs scripts/workflow-lib.test.mjs scripts/local-api.test.mjs scripts/local-env.test.mjs web/scripts/contract.test.mjs
+	COSMOFORMER_GO=$(GO) $(NODE) --test --experimental-test-coverage --test-coverage-include='scripts/*.mjs' --test-coverage-exclude='scripts/*.test.mjs' --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=.build/coverage/workflows/lcov.info scripts/check-go-coverage.test.mjs scripts/overall-coverage.test.mjs scripts/sonar-coverage.test.mjs scripts/merge-go-coverage.test.mjs scripts/ci-checks.test.mjs scripts/native-make.test.mjs scripts/workflow-lib.test.mjs scripts/workflows.test.mjs scripts/local-api.test.mjs scripts/local-env.test.mjs web/scripts/contract.test.mjs
 
 worker-image:
 	docker build --quiet --platform linux/amd64 --target worker -f deploy/worker/Dockerfile -t cosmoformer-worker:local .

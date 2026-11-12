@@ -128,10 +128,16 @@ async function integration() {
     const dir = mkdtempSync(path.join(base, 'run-'));
     const env = {...process.env, COSMOFORMER_TEST_DIR: dir};
     delete env.COSMOFORMER_DATABASE_DSN_FILE; delete env.COSMOFORMER_MIGRATION_DSN_FILE;
+    // Recursive Make command-line overrides outrank environment values, even
+    // across the Node process. Only the explicitly forwarded TEST_ARGS belongs
+    // to the nested invocation; its database context must come from this run.
+    for (const key of ['MAKEFLAGS', 'MAKEOVERRIDES', 'MFLAGS', 'GNUMAKEFLAGS']) delete env[key];
     try {
         await run(node, ['scripts/dev.mjs', 'test-start'], {env, label: 'test-db'});
         env.COSMOFORMER_TEST_OWNER_DSN = readFileSync(path.join(dir, 'owner.dsn'), 'utf8');
         env.COSMOFORMER_TEST_MARKER_FILE = path.join(dir, 'marker');
+        env.COSMOFORMER_TEST_PG_CONTAINER = readFileSync(path.join(dir, 'container'), 'utf8').trim();
+        if (!env.COSMOFORMER_TEST_PG_CONTAINER) throw Error('Owned test database container metadata is empty.');
         await run('make', ['test-integration', `TEST_ARGS=${process.env.TEST_ARGS ?? ''}`], {env});
     } finally {
         // Startup may fail after recording the container; still attempt cleanup.
