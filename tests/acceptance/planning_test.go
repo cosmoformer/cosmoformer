@@ -35,6 +35,11 @@ func (a *planningAccess) Environment(context.Context, awsaccess.Binding) ([]stri
 func newPlanningFixture(t *testing.T) *preflightFixture {
 	t.Helper()
 	f := newPreflightFixture(t)
+	f.enablePlanning(t)
+	return f
+}
+func (f *preflightFixture) enablePlanning(t *testing.T) {
+	t.Helper()
 	ctx := context.Background()
 	if e := f.agent.Admit(ctx); e != nil {
 		t.Fatal(e)
@@ -56,7 +61,6 @@ func newPlanningFixture(t *testing.T) *preflightFixture {
 	f.agent.Access = func(_ string, _ runs.Assignment, _ runs.Identity, _ time.Duration, reg *evidence.Registry) (worker.ExecutionAccess, error) {
 		return &planningAccess{registry: reg}, nil
 	}
-	return f
 }
 func (f *preflightFixture) requestNative(t *testing.T) map[string]any {
 	t.Helper()

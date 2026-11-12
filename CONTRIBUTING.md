@@ -1,6 +1,6 @@
 # Contributing to Cosmoformer
 
-Cosmoformer is an early-stage open-source infrastructure automation project. Local accounts, access control, source-only preflight and gated explicit native planning are implemented for reference development; no production release is available. The current implementation uses Go, PostgreSQL and React Router. See README.md for local setup and checks.
+Cosmoformer is an early-stage open-source infrastructure automation project. Local accounts, access control, source checks, verified PR/tracked-branch native planning and gated explicit saved-plan Apply are implemented for reference development; no production release is available. The current implementation uses Go, PostgreSQL and React Router. See README.md for local setup and checks.
 
 ## Bugs and Feature Proposals
 

@@ -1,10 +1,10 @@
 # Cosmoformer
 
-Cosmoformer is an early-stage, open-source infrastructure automation project. The local reference implementation provides accounts, access control and source preflight with a Go backend, PostgreSQL, and a React Router SPA using Astryx.
+Cosmoformer is an early-stage, open-source infrastructure automation project. The local reference implementation provides accounts, access control, verified PR planning and source checks with a Go backend, PostgreSQL, and a React Router SPA using Astryx.
 
 You can create local accounts, sign in, manage organizations and teams, and assign project/environment access. New accounts have no access. Administration, deployment, approval and raw-evidence permissions are separate. Check source performs Git/HCL preflight and permanent state-destination checks without native execution or an AWS session.
 
-Explicit Plan requests now progress through separate preflight and execution assignments. Assessed compatible stacks can use a fresh Linux worker checkout, pinned module closure, guarded managed inputs and one fixed AWS session to run init → manifest seal → provider schema → saved plan → show JSON. Current source, authority, grants, runtime, inputs and exact worker/backend reservations gate execution. Existing requests and source-reconciliation jobs remain source-only; there is no compatibility bypass. Actual company compatibility remains `not_assessed`.
+Explicit Plan requests now progress through separate preflight and execution assignments. Assessed compatible stacks can use a fresh Linux worker checkout, pinned module closure, guarded managed inputs and one fixed AWS session to run init → manifest seal → provider schema → saved plan → show JSON. Current source, authority, grants, runtime, inputs and exact worker/backend reservations gate execution. Existing source checks retain their immutable source-only intent. Verified PR and tracked-branch reconciliation now creates distinct native planning requests for enabled, assessed compatible stacks under current repository/resource/runtime gates. Automation never approves or queues Apply. Actual company compatibility remains `not_assessed`.
 
 Readiness requires verified exact-version evidence, a sealed reviewed-input manifest, supported native analysis and an independent current managed-secret check. Scoped API reads expose sanitized Changes; raw evidence requires the separate raw-evidence grant. No changes is distinct from source-check success and includes output-only change detection. Logs retain redacted segments or explicit gaps. Missing responses, elapsed deadlines and signal delivery never prove stop or release uncertain ownership.
 
@@ -206,3 +206,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md). Licensed 
 ## Brand assets
 
 The approved Spiral Ribbon logo is available as vector artwork, transparent PNGs, and browser/app icons. See [the brand bundle](assets/brand/README.md) for formats, colors, and regeneration with `make brand`.
+
+## Pull request deployment workflow
+
+Project workspaces include **Pull requests**, scoped to the viewer’s current project and environment grants before grouping or pagination. PR heads retain their separate stack runs, planning/deployment outcomes, queue reasons, recovery attention and exact Changes links. Historical source remains explicit; navigation never retargets a run.
+
+Verified same-repository open PRs targeting the tracked branch can automatically plan compatible authorized stacks. Explicit source checks remain source-only. PR Apply still needs current per-stack policy, exact-plan approval and a separate authenticated confirmation. After merge, the actual tracked commit gets its own normal plan: **No changes** finishes truthfully; remaining changes need their own approvals and explicit Apply. PR approvals and binaries never transfer.
+
+One durable, bounded PR comment links to protected project/run/Changes pages and reflects current authoritative outcomes. Feedback delivery has independent retries and visible failures; it cannot execute infrastructure, grant approval or replay Apply after sign-in or reconnect. See [the operator workflow](docs/operator-guide.md#pull-request-planning-and-deployment-milestone-11) for selection rules, migration 014 and local verification boundaries. Module catalog work remains milestone 12.

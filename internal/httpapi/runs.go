@@ -20,12 +20,12 @@ import (
 
 type RepoFacts struct {
 	URL, ExternalID, Branch, ProjectID, Inventory, IntegrationID string
-	Revision                                                     int64
+	Revision, IntegrationRevision                                int64
 }
 
 func repoFacts(ctx context.Context, tx pgx.Tx, id string) (RepoFacts, error) {
 	var r RepoFacts
-	e := tx.QueryRow(ctx, `SELECT url,external_id,tracked_branch,project_id::text,coalesce(inventory_commit,''),revision,integration_id::text FROM cosmoformer.repositories WHERE id=$1 AND enabled AND EXISTS(SELECT FROM cosmoformer.integrations i WHERE i.id=integration_id AND i.enabled)`, id).Scan(&r.URL, &r.ExternalID, &r.Branch, &r.ProjectID, &r.Inventory, &r.Revision, &r.IntegrationID)
+	e := tx.QueryRow(ctx, `SELECT url,external_id,tracked_branch,project_id::text,coalesce(inventory_commit,''),revision,integration_id::text,(SELECT semantic_revision FROM cosmoformer.integrations i WHERE i.id=integration_id) FROM cosmoformer.repositories WHERE id=$1 AND enabled AND EXISTS(SELECT FROM cosmoformer.integrations i WHERE i.id=integration_id AND i.enabled AND NOT i.reconnect_required)`, id).Scan(&r.URL, &r.ExternalID, &r.Branch, &r.ProjectID, &r.Inventory, &r.Revision, &r.IntegrationID, &r.IntegrationRevision)
 	return r, e
 }
 
@@ -142,7 +142,7 @@ func (a *Server) registerSourceActions(api huma.API) {
 		if contextChanged {
 			return nil, problem(ctx, 409, "The repository source context changed and is unsupported. Review its connection before requesting work.")
 		}
-		raw, e := a.Bitbucket.Manifest(ctx, r.URL, facts.Commit, token)
+		raw, e := a.Bitbucket.Manifest(ctx, r.URL, r.ExternalID, facts.Commit, token)
 		if e != nil {
 			return nil, fail(ctx, e)
 		}
@@ -155,7 +155,7 @@ func (a *Server) registerSourceActions(api huma.API) {
 			if e != nil {
 				return nil, e
 			}
-			if current.Revision != r.Revision {
+			if current.Revision != r.Revision || current.IntegrationRevision != r.IntegrationRevision {
 				return nil, store.ErrConflict
 			}
 			if e = a.Coordinator.RequireObservation(ctx, tx, observation, factsRevision); e != nil {
@@ -246,7 +246,7 @@ func (a *Server) registerSourceActions(api huma.API) {
 		}
 		// PR source is validated against the accepted tracked declaration. New IDs
 		// and changes to administrator-selected resource identity cannot self-enable.
-		raw, e := a.Bitbucket.Manifest(ctx, r.URL, facts.Commit, token)
+		raw, e := a.Bitbucket.Manifest(ctx, r.URL, r.ExternalID, facts.Commit, token)
 		if e != nil {
 			return nil, fail(ctx, e)
 		}
@@ -275,7 +275,7 @@ func (a *Server) registerSourceActions(api huma.API) {
 			if e != nil {
 				return nil, e
 			}
-			if current.Revision != r.Revision {
+			if current.Revision != r.Revision || current.IntegrationRevision != r.IntegrationRevision {
 				return nil, store.ErrConflict
 			}
 			if e = a.Coordinator.RequireObservation(ctx, tx, observation, factsRevision); e != nil {
@@ -446,7 +446,7 @@ func (a *Server) acceptSourceFacts(ctx context.Context, org, repo string, r Repo
 		if e != nil {
 			return e
 		}
-		if current.Revision != r.Revision {
+		if current.Revision != r.Revision || current.IntegrationRevision != r.IntegrationRevision {
 			return store.ErrConflict
 		}
 		revision, e = a.Coordinator.AcceptObservation(ctx, tx, org, o, f)

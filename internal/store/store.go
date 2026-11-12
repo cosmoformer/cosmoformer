@@ -15,7 +15,7 @@ import (
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
-const SchemaVersion int32 = 13
+const SchemaVersion int32 = 14
 
 var ErrForbidden = errors.New("insufficient permission")
 var ErrNotFound = errors.New("not found")
@@ -98,6 +98,12 @@ func (s *Store) Ready(ctx context.Context) error {
 		return errors.New("database saved-plan Apply has incompatible protections")
 	}
 
+	if e = s.Pool.QueryRow(ctx, `SELECT
+ (SELECT count(*)=7 FROM pg_trigger WHERE (tgname='queue_pr_feedback' AND tgrelid IN ('cosmoformer.source_subjects'::regclass,'cosmoformer.runs'::regclass,'cosmoformer.operations'::regclass,'cosmoformer.plans'::regclass,'cosmoformer.plan_votes'::regclass,'cosmoformer.recovery_cases'::regclass) OR tgname='pr_source_changed' AND tgrelid='cosmoformer.source_subjects'::regclass) AND tgenabled='O')
+ AND EXISTS(SELECT FROM pg_attribute WHERE attrelid='cosmoformer.source_subjects'::regclass AND attname='path_selection' AND NOT attisdropped)
+ AND EXISTS(SELECT FROM pg_trigger WHERE tgname='feedback_comment_identity' AND tgrelid='cosmoformer.feedback_comments'::regclass AND tgenabled='O')`).Scan(&safe); e != nil || !safe {
+		return errors.New("database PR workflow has incompatible protections")
+	}
 	return nil
 }
 func MigrationNames() ([]string, error) { return fs.Glob(migrationFiles, "migrations/*.sql") }

@@ -109,6 +109,16 @@ func repoPath(repo string) (string, error) {
 	u, _ := url.Parse(repo)
 	return "/repositories/" + strings.TrimSuffix(strings.TrimPrefix(u.Path, "/"), ".git"), nil
 }
+
+// API requests address the immutable provider UUID, not a reusable slug. The
+// registered URL is still validated separately and checked against live facts.
+func repositoryPath(repo, externalID string) (string, error) {
+	if _, e := repoPath(repo); e != nil || !regexp.MustCompile(`^\{[A-Za-z0-9-]{1,254}\}$`).MatchString(externalID) {
+		return "", ErrRemote
+	}
+	return "/repositories/%7B%7D/" + url.PathEscape(externalID), nil
+}
+
 func (c *Client) Read(ctx context.Context, repo, externalID, branch string, pr int, token string) (Facts, error) {
 	var f Facts
 	p, e := repoPath(repo)
@@ -125,6 +135,13 @@ func (c *Client) Read(ctx context.Context, repo, externalID, branch string, pr i
 		if identity.UUID == "" || len(identity.UUID) > 256 {
 			return f, ErrRemote
 		}
+		if identity.UUID != externalID {
+			return Facts{RepositoryID: identity.UUID}, ErrContextChanged
+		}
+		p, e = repositoryPath(repo, externalID)
+		if e != nil {
+			return f, e
+		}
 		var b struct {
 			Name   string `json:"name"`
 			Target struct {
@@ -139,14 +156,28 @@ func (c *Client) Read(ctx context.Context, repo, externalID, branch string, pr i
 			return f, ErrRemote
 		}
 		f = Facts{identity.UUID, identity.UUID, b.Target.Hash, branch, branch, "OPEN", 0}
-		if identity.UUID != externalID {
-			return f, ErrContextChanged
-		}
 		return f, nil
 	}
 	if pr < 1 {
 		return f, ErrRemote
 	}
+	var canonical struct {
+		UUID string `json:"uuid"`
+	}
+	if e = c.request(ctx, "GET", p, token, nil, &canonical); e != nil {
+		return f, e
+	}
+	if canonical.UUID == "" || len(canonical.UUID) > 256 {
+		return f, ErrRemote
+	}
+	if canonical.UUID != externalID {
+		return Facts{RepositoryID: canonical.UUID}, ErrContextChanged
+	}
+	p, e = repositoryPath(repo, externalID)
+	if e != nil {
+		return f, e
+	}
+
 	var b struct {
 		State  string `json:"state"`
 		Source struct {
@@ -185,8 +216,8 @@ func (c *Client) Read(ctx context.Context, repo, externalID, branch string, pr i
 	return f, nil
 }
 func fmtInt(n int) string { b, _ := json.Marshal(n); return string(b) }
-func (c *Client) Manifest(ctx context.Context, repo, commit, token string) ([]byte, error) {
-	p, e := repoPath(repo)
+func (c *Client) Manifest(ctx context.Context, repo, externalID, commit, token string) ([]byte, error) {
+	p, e := repositoryPath(repo, externalID)
 	if e != nil || !source.Commit(commit) {
 		return nil, ErrRemote
 	}
@@ -222,4 +253,66 @@ func Signature(body []byte, header string, key []byte) bool {
 	h := hmac.New(sha256.New, key)
 	h.Write(body)
 	return hmac.Equal(got, h.Sum(nil))
+}
+
+// ChangedPaths reads only an exact verified range. Any incomplete or unsupported
+// response is conservative; diff metadata never authorizes a repository/stack.
+func (c *Client) ChangedPaths(ctx context.Context, repo, externalID, base, head, token string) ([]string, bool) {
+	p, e := repositoryPath(repo, externalID)
+	if e != nil || !source.Commit(base) || !source.Commit(head) {
+		return nil, false
+	}
+	// Equality can follow an inventory import whose path decision was lost. Treat
+	// it conservatively; durable per-facts selection prevents unchanged-sweep drift.
+	if base == head {
+		return nil, false
+	}
+	endpoint := p + "/diffstat/" + base + ".." + head
+	next := endpoint + "?pagelen=100"
+	paths := []string{}
+	entries := 0
+	for page := 0; page < 10; page++ {
+		var b struct {
+			Values *[]struct {
+				Old, New *struct {
+					Path string `json:"path"`
+				}
+			} `json:"values"`
+			Next      string `json:"next"`
+			Size      *int   `json:"size"`
+			Truncated bool   `json:"truncated"`
+		}
+		if c.request(ctx, "GET", next, token, nil, &b) != nil || b.Values == nil || b.Truncated || len(*b.Values) > 100 {
+			return nil, false
+		}
+		entries += len(*b.Values)
+		for _, entry := range *b.Values {
+			if entry.Old == nil && entry.New == nil {
+				return nil, false
+			}
+			for _, side := range []*struct {
+				Path string `json:"path"`
+			}{entry.Old, entry.New} {
+				if side == nil {
+					continue
+				}
+				if !catalog.RepoPath(side.Path) {
+					return nil, false
+				}
+				paths = append(paths, side.Path)
+			}
+		}
+		if b.Next == "" {
+			if b.Size != nil && *b.Size != entries {
+				return nil, false
+			}
+			return paths, true
+		}
+		u, e := url.Parse(b.Next)
+		if e != nil || u.Scheme != "https" || u.Host != "api.bitbucket.org" || u.User != nil || u.Fragment != "" || u.EscapedPath() != "/2.0"+endpoint {
+			return nil, false
+		}
+		next = endpoint + "?" + u.RawQuery
+	}
+	return nil, false
 }
