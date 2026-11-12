@@ -446,7 +446,7 @@ func (c *Coordinator) authority(ctx context.Context, tx pgx.Tx, operation string
 
 	var requester, project, env, repo, kind string
 	var enabled bool
-	e := tx.QueryRow(ctx, `SELECT coalesce(o.requester_id::text,''),s.project_id::text,s.environment_id::text,s.repository_id::text,coalesce(cosmoformer.requester_enabled(o.requester_id),false),o.kind FROM cosmoformer.operations o JOIN cosmoformer.stacks s ON s.id=o.stack_id JOIN cosmoformer.repositories r ON r.id=s.repository_id WHERE o.id=$1 AND NOT s.archived AND r.enabled AND s.effective_revision_id=$2 AND NOT (o.native_planning AND o.recovery_case_id IS NULL AND EXISTS(SELECT FROM cosmoformer.recovery_cases rc WHERE rc.stack_id=o.stack_id AND rc.status='cleared' AND o.accepted_at<=rc.cleared_at))`, operation, s.StackRevisionID).Scan(&requester, &project, &env, &repo, &enabled, &kind)
+	e := tx.QueryRow(ctx, `SELECT coalesce(o.requester_id::text,''),s.project_id::text,s.environment_id::text,s.repository_id::text,coalesce(cosmoformer.requester_enabled(o.requester_id),false),o.kind FROM cosmoformer.operations o JOIN cosmoformer.stacks s ON s.id=o.stack_id JOIN cosmoformer.repositories r ON r.id=s.repository_id WHERE o.id=$1 AND NOT s.archived AND r.enabled AND EXISTS(SELECT FROM cosmoformer.integrations i WHERE i.id=r.integration_id AND i.enabled AND NOT i.reconnect_required) AND s.effective_revision_id=$2 AND NOT (o.native_planning AND o.recovery_case_id IS NULL AND EXISTS(SELECT FROM cosmoformer.recovery_cases rc WHERE rc.stack_id=o.stack_id AND rc.status='cleared' AND o.accepted_at<=rc.cleared_at))`, operation, s.StackRevisionID).Scan(&requester, &project, &env, &repo, &enabled, &kind)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return runs.Fail("INPUTS_CHANGED")
 	}

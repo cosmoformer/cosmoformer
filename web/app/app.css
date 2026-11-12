@@ -135,3 +135,16 @@ code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.9em}
 .status-badge.attention { background:#fff1d8; color:#75511a; }
 [data-appearance=dark] .status-badge.attention { background:#604627; color:#ffe2ba; }
 @media(max-width:700px) { .review-workspace .page-heading { flex-direction:column; align-items:flex-start; } }
+
+.pr-head { margin-block: 1.25rem; }
+.pr-head > p { overflow-wrap: anywhere; }
+.pr-head .table-panel { overflow-x: auto; }
+.pr-head table { min-width: 42rem; }
+@media (max-width: 760px) {
+    .pr-head table { min-width: 0; }
+    .pr-head thead { display: none; }
+    .pr-head tbody, .pr-head tr, .pr-head td { display: block; width: 100%; }
+    .pr-head tr { padding-block: .75rem; border-bottom: 1px solid #91ac9c55; }
+    .pr-head td { border: 0; padding: .5rem 0; overflow-wrap: anywhere; }
+    .pr-head td::before { content: attr(data-label); display: block; font-weight: 600; margin-bottom: .25rem; }
+}

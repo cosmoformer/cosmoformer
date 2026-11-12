@@ -264,6 +264,7 @@ func TestRejectedSourceProcessingStillCommitsNewFacts(t *testing.T) {
 func TestCommittedSourceObservationStillFencesDelayedWorkCreation(t *testing.T) {
 	f := newSourceFixture(t)
 	f.tracked(t)
+	f.enableNative(t)
 	ctx := context.Background()
 	old := f.Remote.Commit
 	newer := strings.Repeat("b", 40)

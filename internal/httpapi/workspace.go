@@ -127,6 +127,7 @@ type RunOutput struct {
 
 const runColumns = `r.id::text,s.id::text,s.display_name,s.project_id::text,pj.name,s.environment_id::text,en.name,r.source_commit,ss.kind,ss.external_key,coalesce(w.assignment_spec->'source'->>'url',''),coalesce(w.assignment_spec->'source'->>'root',''),r.purpose,o.id::text,o.native_planning,o.status,coalesce(o.terminal_reason,''),o.priority,r.created_at,o.accepted_at,
  CASE WHEN o.status<>'queued' THEN ''
+ WHEN r.source_facts_revision<>ss.facts_revision THEN 'SOURCE_CHANGED'
  WHEN EXISTS(SELECT FROM cosmoformer.recovery_cases rc WHERE rc.stack_id=s.id AND rc.status='open') THEN 'RECOVERY_REQUIRED'
  WHEN EXISTS(SELECT FROM cosmoformer.attempts a WHERE a.stack_id=s.id AND a.closed_at IS NULL) THEN 'STACK_BUSY'
  WHEN NOT EXISTS(SELECT FROM cosmoformer.workers cw WHERE cw.pool_id::text=w.assignment_spec->'pool'->>'id' AND cw.runtime_id::text=w.assignment_spec->'engine'->>'runtime_id' AND NOT cw.paused AND EXISTS(SELECT FROM cosmoformer.worker_pools wp WHERE wp.id=cw.pool_id AND wp.enabled) AND cw.last_contact_at>clock_timestamp()-interval '30 seconds' AND cw.capabilities->'supported_work_phases' ? w.phase AND cw.tags @> ARRAY(SELECT jsonb_array_elements_text(coalesce(w.assignment_spec->'pool'->'tags','[]'::jsonb)))) THEN 'NO_COMPATIBLE_WORKER'
@@ -191,6 +192,7 @@ func planEvidenceStatus(ctx context.Context, tx pgx.Tx, p *PlanStatus) error {
 }
 func (a *Server) registerWorkspace(api huma.API) {
 	a.registerStackReads(api)
+	a.registerPullRequests(api)
 	register(api, "GET", "/organizations/{org}/runs", "runs", func(ctx context.Context, in *WorkspaceListInput) (*RunsOutput, error) {
 		out := &RunsOutput{}
 		out.Body.Runs = []RunPublic{}
@@ -414,7 +416,8 @@ func (a *Server) registerStackReads(api huma.API) {
 }
 
 func runOperations(ctx context.Context, tx pgx.Tx, run string, scopes ...[]access.Grant) ([]OperationPublic, error) {
-	rows, e := tx.Query(ctx, `SELECT o.id::text,o.kind,o.status,coalesce(o.terminal_reason,''),o.priority,o.revision,o.accepted_at,CASE WHEN o.status<>'queued' THEN '' WHEN EXISTS(SELECT FROM cosmoformer.recovery_cases r WHERE r.stack_id=o.stack_id AND r.status='open') THEN 'RECOVERY_REQUIRED' WHEN EXISTS(SELECT FROM cosmoformer.attempts a WHERE a.stack_id=o.stack_id AND a.closed_at IS NULL) THEN 'STACK_BUSY' WHEN NOT EXISTS(SELECT FROM cosmoformer.workers cw WHERE cw.pool_id::text=w.assignment_spec->'pool'->>'id' AND cw.runtime_id::text=w.assignment_spec->'engine'->>'runtime_id' AND NOT cw.paused AND cw.last_contact_at>clock_timestamp()-interval '30 seconds' AND cw.capabilities->'supported_work_phases' ? w.phase AND cw.tags @> ARRAY(SELECT jsonb_array_elements_text(coalesce(w.assignment_spec->'pool'->'tags','[]'::jsonb)))) THEN 'NO_COMPATIBLE_WORKER' ELSE 'WAITING_CAPACITY' END,s.project_id::text,s.environment_id::text,EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=o.id AND outcome='preparation_failed') AND NOT EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=o.id AND (ever_permitted OR closed_at IS NULL OR outcome NOT IN ('success','preparation_failed'))) FROM cosmoformer.operations o JOIN cosmoformer.stacks s ON s.id=o.stack_id LEFT JOIN LATERAL(SELECT assignment_spec,phase FROM cosmoformer.work_items WHERE operation_id=o.id ORDER BY CASE phase WHEN 'execution' THEN 0 ELSE 1 END LIMIT 1) w ON true WHERE o.run_id=$1 ORDER BY o.accepted_at DESC,o.id DESC LIMIT 100`, run)
+	rows, e := tx.Query(ctx, `SELECT o.id::text,o.kind,o.status,coalesce(o.terminal_reason,''),o.priority,o.revision,o.accepted_at,CASE WHEN o.status<>'queued' THEN ''
+ WHEN r.source_facts_revision<>ss.facts_revision THEN 'SOURCE_CHANGED' WHEN EXISTS(SELECT FROM cosmoformer.recovery_cases r WHERE r.stack_id=o.stack_id AND r.status='open') THEN 'RECOVERY_REQUIRED' WHEN EXISTS(SELECT FROM cosmoformer.attempts a WHERE a.stack_id=o.stack_id AND a.closed_at IS NULL) THEN 'STACK_BUSY' WHEN NOT EXISTS(SELECT FROM cosmoformer.workers cw WHERE cw.pool_id::text=w.assignment_spec->'pool'->>'id' AND cw.runtime_id::text=w.assignment_spec->'engine'->>'runtime_id' AND NOT cw.paused AND cw.last_contact_at>clock_timestamp()-interval '30 seconds' AND cw.capabilities->'supported_work_phases' ? w.phase AND cw.tags @> ARRAY(SELECT jsonb_array_elements_text(coalesce(w.assignment_spec->'pool'->'tags','[]'::jsonb)))) THEN 'NO_COMPATIBLE_WORKER' ELSE 'WAITING_CAPACITY' END,s.project_id::text,s.environment_id::text,EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=o.id AND outcome='preparation_failed') AND NOT EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=o.id AND (ever_permitted OR closed_at IS NULL OR outcome NOT IN ('success','preparation_failed'))) FROM cosmoformer.operations o JOIN cosmoformer.runs r ON r.id=o.run_id JOIN cosmoformer.source_subjects ss ON ss.id=r.source_subject_id JOIN cosmoformer.stacks s ON s.id=o.stack_id LEFT JOIN LATERAL(SELECT assignment_spec,phase FROM cosmoformer.work_items WHERE operation_id=o.id ORDER BY CASE phase WHEN 'execution' THEN 0 ELSE 1 END LIMIT 1) w ON true WHERE o.run_id=$1 ORDER BY o.accepted_at DESC,o.id DESC LIMIT 100`, run)
 	if e != nil {
 		return nil, e
 	}

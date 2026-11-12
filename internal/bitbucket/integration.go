@@ -57,8 +57,8 @@ func (c *Client) token(ctx context.Context, id, secret string, form url.Values) 
 	}
 	return t, nil
 }
-func (c *Client) Comment(ctx context.Context, repo string, pr int, commentID, token, text string) (string, error) {
-	p, e := repoPath(repo)
+func (c *Client) Comment(ctx context.Context, repo, externalID string, pr int, commentID, token, text string) (string, error) {
+	p, e := repositoryPath(repo, externalID)
 	if e != nil || pr < 1 || len(text) > 8192 {
 		return "", ErrRemote
 	}
@@ -80,41 +80,56 @@ func (c *Client) Comment(ctx context.Context, repo string, pr int, commentID, to
 	if e = c.request(ctx, method, p, token, bytes.NewReader(b), &out); e != nil {
 		return "", e
 	}
-	if out.ID < 1 {
+	if out.ID < 1 || commentID != "" && fmtInt(out.ID) != commentID {
 		return "", ErrRemote
 	}
 	return fmtInt(out.ID), nil
 }
-func (c *Client) FindComment(ctx context.Context, repo string, pr int, token, marker string) (string, error) {
-	p, e := repoPath(repo)
+func (c *Client) FindComment(ctx context.Context, repo, externalID string, pr int, token, marker string) (string, error) {
+	p, e := repositoryPath(repo, externalID)
 	if e != nil || pr < 1 || marker == "" {
 		return "", ErrRemote
 	}
 	base := p + "/pullrequests/" + fmtInt(pr) + "/comments"
 	next := base + "?pagelen=100"
+	entries := 0
+	found := ""
 	for page := 0; page < 20; page++ {
 		var body struct {
-			Values []struct {
+			Values *[]struct {
 				ID      int `json:"id"`
 				Content struct {
 					Raw string `json:"raw"`
 				} `json:"content"`
 			} `json:"values"`
-			Next string `json:"next"`
+			Next      string `json:"next"`
+			Size      *int   `json:"size"`
+			Truncated bool   `json:"truncated"`
 		}
 		if e = c.request(ctx, "GET", next, token, nil, &body); e != nil {
 			return "", e
 		}
-		for _, v := range body.Values {
+		if body.Values == nil || body.Truncated || len(*body.Values) > 100 {
+			return "", ErrRemote
+		}
+		entries += len(*body.Values)
+		for _, v := range *body.Values {
 			if v.ID > 0 && strings.Contains(v.Content.Raw, marker) {
-				return fmtInt(v.ID), nil
+				id := fmtInt(v.ID)
+				if found != "" && found != id {
+					return "", ErrRemote
+				}
+				found = id
 			}
 		}
 		if body.Next == "" {
-			return "", nil
+			if body.Size != nil && *body.Size != entries {
+				return "", ErrRemote
+			}
+			return found, nil
 		}
 		u, e := url.Parse(body.Next)
-		if e != nil || u.Scheme != "https" || u.Host != "api.bitbucket.org" || u.User != nil || u.Fragment != "" || u.Path != "/2.0"+base {
+		if e != nil || u.Scheme != "https" || u.Host != "api.bitbucket.org" || u.User != nil || u.Fragment != "" || u.EscapedPath() != "/2.0"+base {
 			return "", ErrRemote
 		}
 		next = base + "?" + u.RawQuery

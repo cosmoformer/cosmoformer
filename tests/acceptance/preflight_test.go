@@ -55,6 +55,7 @@ type sourceTransport struct {
 	manifest                []byte
 	commit                  string
 	prDestination           string
+	prCommit                string
 	prState                 string
 	prSourceRepository      string
 	prDestinationRepository string
@@ -90,7 +91,11 @@ func (s *sourceTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 		if destinationRepo == "" {
 			destinationRepo = "{fictional-repository}"
 		}
-		body = []byte(`{"state":"` + state + `","source":{"repository":{"uuid":"` + sourceRepo + `"},"commit":{"hash":"` + s.commit + `"},"branch":{"name":"change"}},"destination":{"repository":{"uuid":"` + destinationRepo + `"},"branch":{"name":"` + destination + `"}}}`)
+		prCommit := s.prCommit
+		if prCommit == "" {
+			prCommit = s.commit
+		}
+		body = []byte(`{"state":"` + state + `","source":{"repository":{"uuid":"` + sourceRepo + `"},"commit":{"hash":"` + prCommit + `"},"branch":{"name":"change"}},"destination":{"repository":{"uuid":"` + destinationRepo + `"},"branch":{"name":"` + destination + `"}}}`)
 	}
 	return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body)), Request: r}, nil
 }

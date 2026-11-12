@@ -28,9 +28,9 @@ func TestProviderFailurePreservesRetryClassification(t *testing.T) {
 					if operation == "update comment" {
 						id = "42"
 					}
-					_, e = c.Comment(context.Background(), "https://bitbucket.org/fictional/repo.git", 3, id, "", "synthetic feedback")
+					_, e = c.Comment(context.Background(), "https://bitbucket.org/fictional/repo.git", "{fictional}", 3, id, "", "synthetic feedback")
 				} else if operation == "manifest" {
-					_, e = c.Manifest(context.Background(), "https://bitbucket.org/fictional/repo.git", strings.Repeat("a", 40), "")
+					_, e = c.Manifest(context.Background(), "https://bitbucket.org/fictional/repo.git", "{fictional}", strings.Repeat("a", 40), "")
 				} else {
 					pr := 0
 					if operation == "pull request" {
@@ -86,14 +86,14 @@ func TestCommentPaginationCannotMoveCredentialOrigin(t *testing.T) {
 				if scenario == "bad JSON" {
 					return response(r, `{`), nil
 				}
-				next := "https://api.bitbucket.org/2.0/repositories/fictional/repo/pullrequests/3/comments?page=2"
+				next := "https://api.bitbucket.org/2.0/repositories/%7B%7D/%7Bfictional%7D/pullrequests/3/comments?page=2"
 				switch scenario {
 				case "foreign host":
 					next = "https://attacker.example/comments"
 				case "foreign repository":
 					next = "https://api.bitbucket.org/2.0/repositories/other/repo/pullrequests/3/comments"
 				case "userinfo":
-					next = "https://user@api.bitbucket.org/2.0/repositories/fictional/repo/pullrequests/3/comments"
+					next = "https://user@api.bitbucket.org/2.0/repositories/%7B%7D/%7Bfictional%7D/pullrequests/3/comments"
 				case "fragment":
 					next += "#fragment"
 				}
@@ -102,7 +102,7 @@ func TestCommentPaginationCannotMoveCredentialOrigin(t *testing.T) {
 				}
 				return response(r, `{"values":[],"next":"`+next+`"}`), nil
 			})})
-			id, e := c.FindComment(context.Background(), "https://bitbucket.org/fictional/repo.git", 3, "fictional", marker)
+			id, e := c.FindComment(context.Background(), "https://bitbucket.org/fictional/repo.git", "{fictional}", 3, "fictional", marker)
 			if scenario == "found on next page" {
 				if e != nil || id != "42" || calls != 2 {
 					t.Fatal(id, calls, e)
@@ -147,21 +147,21 @@ func TestInvalidCommentIdentityNeverSendsARequest(t *testing.T) {
 		return response(r, `{"id":42}`), nil
 	})})
 	for _, id := range []string{"../other", "42?query"} {
-		if _, e := c.Comment(context.Background(), "https://bitbucket.org/fictional/repo.git", 3, id, "", "fixture"); e == nil {
+		if _, e := c.Comment(context.Background(), "https://bitbucket.org/fictional/repo.git", "{fictional}", 3, id, "", "fixture"); e == nil {
 			t.Fatal("invalid comment identity accepted")
 		}
 	}
 	if calls != 0 {
 		t.Fatal("invalid comment identity reached provider", calls)
 	}
-	if id, e := c.Comment(context.Background(), "https://bitbucket.org/fictional/repo.git", 3, "", "", "fixture"); e != nil || id != "42" || calls != 1 {
+	if id, e := c.Comment(context.Background(), "https://bitbucket.org/fictional/repo.git", "{fictional}", 3, "", "", "fixture"); e != nil || id != "42" || calls != 1 {
 		t.Fatal("new comment positive control failed", id, e)
 	}
 }
 
 func TestCommentsRejectMissingResponseIdentity(t *testing.T) {
 	c := New(&http.Client{Transport: transport(func(r *http.Request) (*http.Response, error) { return response(r, `{"id":0}`), nil })})
-	if _, e := c.Comment(context.Background(), "https://bitbucket.org/fictional/repo.git", 3, "", "", "fixture"); e == nil {
+	if _, e := c.Comment(context.Background(), "https://bitbucket.org/fictional/repo.git", "{fictional}", 3, "", "", "fixture"); e == nil {
 		t.Fatal("zero comment identity accepted")
 	}
 }

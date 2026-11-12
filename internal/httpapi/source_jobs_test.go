@@ -178,6 +178,7 @@ func TestSignedWebhookQueuesAndReconcilesLocally(t *testing.T) {
 	f := newSourceFixture(t)
 	f.configure(t)
 	f.connect(t)
+	f.enableNative(t)
 	f.Remote.Calls = 0
 	ctx := context.Background()
 	body := []byte(`{"repository":{"uuid":"{fictional-repository}"}}`)

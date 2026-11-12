@@ -90,6 +90,12 @@ func TestVersionEightDefinerUpgrade(t *testing.T) {
 	db, c, fingerprint := quotaConnection(t)
 	// Restore the exact version-8 function setting without rewriting migrations.
 	sqlOK(t, db.Owner, `
+ DROP FUNCTION cosmoformer.queue_pr_feedback() CASCADE;
+ DROP FUNCTION cosmoformer.pr_source_changed() CASCADE;
+ ALTER TABLE cosmoformer.source_subjects DROP COLUMN path_selection;
+ DROP FUNCTION cosmoformer.feedback_comment_identity() CASCADE;
+ ALTER TABLE cosmoformer.feedback_comments DROP COLUMN creation_pending,DROP COLUMN recovery_marker;
+ DROP INDEX cosmoformer.runs_pr_heads;
  DROP FUNCTION cosmoformer.count_plan_approvals(uuid);
  DROP FUNCTION cosmoformer.release_operation_holds() CASCADE;
  DROP FUNCTION cosmoformer.retire_queued_applies() CASCADE;

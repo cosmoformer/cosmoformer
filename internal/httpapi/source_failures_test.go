@@ -165,6 +165,7 @@ func TestTrackedInventoryAndPlansRejectChangedSource(t *testing.T) {
 func TestSourceReconciliationStopsAfterPRClosureAndRejectsIdentityChanges(t *testing.T) {
 	f := newSourceFixture(t)
 	s, stack := f.tracked(t)
+	f.enableNative(t)
 	ctx := context.Background()
 	if e := f.Server.reconcileSource(ctx, f.Org, f.Repo, "pr", 3); e != nil {
 		t.Fatal(e)
@@ -215,6 +216,7 @@ func TestSourceReconciliationStopsAfterPRClosureAndRejectsIdentityChanges(t *tes
 
 func TestSourceJobLoopReconcilesAndStops(t *testing.T) {
 	f := newSourceFixture(t)
+	f.enableNative(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan struct{})
@@ -248,7 +250,11 @@ func TestSourceJobLoopReconcilesAndStops(t *testing.T) {
 func TestFeedbackAdoptsCommentAfterAmbiguousPriorDelivery(t *testing.T) {
 	f := newSourceFixture(t)
 	job := f.feedbackJob(t)
-	marker := "<!-- cosmoformer:" + f.Repo + ":3 -->"
+	var nonce string
+	if e := f.DB.Owner.QueryRow(context.Background(), `INSERT INTO cosmoformer.feedback_comments(org_id,repository_id,pr_number,comment_id,creation_pending) VALUES($1,$2,3,'',true) ON CONFLICT(org_id,repository_id,pr_number) DO UPDATE SET creation_pending=true RETURNING recovery_marker::text`, f.Org, f.Repo).Scan(&nonce); e != nil {
+		t.Fatal(e)
+	}
+	marker := "<!-- cosmoformer:" + f.Repo + ":3:" + nonce + " -->"
 	writes := 0
 	f.Server.Bitbucket.HTTP.Transport = fixtureTransport(func(r *http.Request) (*http.Response, error) {
 		raw := `{"values":[{"id":51,"content":{"raw":"` + marker + `"}}]}`

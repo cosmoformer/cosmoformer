@@ -17,6 +17,7 @@ func TestRetargetedPRRevokesAuthorityBeforeDecliningWork(t *testing.T) {
 		t.Run(path, func(t *testing.T) {
 			f := newSourceFixture(t)
 			_, stack := f.tracked(t)
+			f.enableNative(t)
 			ctx := context.Background()
 			if err := f.Server.reconcileSource(ctx, f.Org, f.Repo, "pr", 3); err != nil {
 				t.Fatal(err)
@@ -57,6 +58,7 @@ func TestPeriodicSweepRepairsMissedPRChanges(t *testing.T) {
 		t.Run(change, func(t *testing.T) {
 			f := newSourceFixture(t)
 			f.tracked(t)
+			f.enableNative(t)
 			ctx := context.Background()
 			for _, pr := range []int{3, 4} {
 				if err := f.Server.reconcileSource(ctx, f.Org, f.Repo, "pr", pr); err != nil {
@@ -107,6 +109,7 @@ func TestSourceActionReplayPrecedesSourceReadsAndRevisionChecks(t *testing.T) {
 		t.Run(action, func(t *testing.T) {
 			f := newSourceFixture(t)
 			_, stack := f.tracked(t)
+			f.enableNative(t)
 			ctx := context.Background()
 			base := "/api/v1/organizations/" + f.Org
 			path := base + "/stacks/" + stack + "/plans"
