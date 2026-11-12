@@ -7,6 +7,7 @@ export GOCACHE := $(CURDIR)/.build/go-cache
 export GOPATH := $(CURDIR)/.build/gopath
 export PATH := $(firstword $(wildcard $(CURDIR)/.build/tools/node-v26.13.0-*/bin)):$(PATH)
 export COSMOFORMER_TEST_OWNER_DSN ?= $(shell cat .build/testdb/owner.dsn 2>/dev/null)
+export COSMOFORMER_TEST_PG_CONTAINER ?= $(shell cat .build/testdb/container 2>/dev/null)
 export COSMOFORMER_TEST_MARKER_FILE ?= $(CURDIR)/.build/testdb/marker
 
 .PHONY: brand tools deps dev-setup dev-api dev-web dev-stop contract test-db-start test-db-stop test-unit test-integration test-source test-native test-scripts worker-image test-coverage test-go-coverage test-linux-coverage test-contract-coverage test-web-unit test-web-coverage test-runtime-coverage test-web browser-server coverage-start test-overall-coverage check
@@ -77,7 +78,7 @@ test-unit:
 	$(GO) vet ./...
 
 test-integration:
-	$(GO) test -race -timeout=30m -tags=integration ./internal/store ./internal/coordinator ./internal/httpapi ./cmd/... ./tests/acceptance $(TEST_ARGS)
+	$(GO) test -race -timeout=30m -tags=integration ./internal/store ./internal/coordinator ./internal/httpapi ./internal/operator ./cmd/... ./tests/acceptance $(TEST_ARGS)
 
 # Preserve the same marked database selection and tool/cache environment as the
 # ordinary local checks when CI invokes an individual Go coverage producer.

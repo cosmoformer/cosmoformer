@@ -801,3 +801,46 @@ func TestMilestone9ClockFaultAllowsIndependentStopAndEvidence(t *testing.T) {
 		})
 	}
 }
+
+func TestMilestone13OriginlessRestoreRecoveryRequiresManualEvidenceAndCurrentVotes(t *testing.T) {
+	f := newApprovalFixture(t, 2)
+	deployer(t, f.executionFixture)
+	id := runs.ID()
+	f.exec(t, `INSERT INTO cosmoformer.recovery_cases(id,org_id,stack_id,target_id,status,evidence,opened_at) SELECT $1,org_id,stack_id,target_id,'open','{}',clock_timestamp() FROM cosmoformer.attempts WHERE id=$2`, id, f.assignment.AttemptID)
+	path := recoveryPath(f.executionFixture, id)
+	r := f.voter.call("GET", path, nil, 200)
+	if r["origin_attempt_id"] != "" {
+		t.Fatal("restore invented an originating attempt")
+	}
+	f.voter.call("PATCH", path+"/evidence", recoveryBody(r["revision"], "agent", f.assignment.AttemptID, true), 409)
+	r = f.voter.call("PATCH", path+"/evidence", recoveryBody(r["revision"], "operator", "external-restore-stop-proof", true), 200)
+	vote := map[string]any{"expected_evidence_revision": r["evidence_revision"]}
+	f.voter.call("POST", path+"/clear", vote, 409)
+	r = f.voter.call("POST", path+"/approvals", vote, 200)
+	assertCount(t, r, 1, 2)
+	f.voter.call("POST", path+"/clear", vote, 409)
+	second := f.second(t, "restore.second")
+	r = second.call("POST", path+"/approvals", vote, 200)
+	assertCount(t, r, 2, 2)
+	f.exec(t, `UPDATE cosmoformer.grants SET revoked_at=clock_timestamp() WHERE role='approver'`)
+	f.voter.call("POST", path+"/clear", vote, 409)
+	f.exec(t, `UPDATE cosmoformer.grants SET revoked_at=NULL WHERE role='approver'`)
+	r = f.voter.call("POST", path+"/clear", vote, 200)
+	if r["status"] != "cleared" {
+		t.Fatal("manual restored backend did not clear with current votes")
+	}
+	var status string
+	if err := f.db.Owner.QueryRow(context.Background(), `SELECT status FROM cosmoformer.plans WHERE id=$1`, f.plan["id"]).Scan(&status); err != nil || status != "invalidated" {
+		t.Fatal("restore clearance revived an old plan", status, err)
+	}
+}
+
+func TestMilestone13MaintenanceRetainsOwnershipAndAcceptsAuthenticatedStops(t *testing.T) {
+	f := newExecutionFixture(t)
+	prepared := f.prepare(t)
+	f.exec(t, `UPDATE cosmoformer.installation SET maintenance=true,maintenance_id=gen_random_uuid()`)
+	// Permission issuance is blocked even for the still-authenticated owning agent.
+	f.workerCall(t, "/attempts/"+f.assignment.AttemptID+"/start-permission", f.message(f.request(t, 1, "init", "")), 409)
+	// The same agent can report that it never created a state-capable child.
+	f.transition(t, "result", runs.ExecutionResult{Outcome: "preparation_failed", Commands: []runs.CommandResult{}, Artifacts: []string{prepared.Artifact}, PreInitDigest: runs.Digest(f.pre), NoStateChild: true, Reaped: true}, 200)
+}

@@ -14,6 +14,8 @@ Schema version **13** adds saved-plan Apply retirement, exact operation identity
 
 The run workspace supports scoped Cancel, separately confirmed Force Stop and formal recovery. Requests, delivery, observed controls and independently proven stop remain separate. Recovery evidence is versioned; clearance requires verified stop, reconciliation, distinct current approvers and current Apply permission. Diagnostic plans retain recovery-only provenance. Clearance requires a new normal plan and new normal approvals afterward.
 
+Schema version **15** adds host-only maintenance, atomic offline key rotation, exact backup holds, clock recovery and restore reconciliation. Restore revokes replay authority, requires a genuinely new write key and routes adopted backends through existing recovery. See the [operator maintenance and restoration guide](docs/operator-guide.md#operator-maintenance-and-restoration-milestone-13) and run `node scripts/operator-recovery.mjs` with the pinned Node toolchain for a synthetic, isolated PostgreSQL restore exercise. Migrations 001–014 remain unchanged.
+
 There is no production release. Scheduled cleanup and deployment packaging remain unfinished. Synthetic PostgreSQL/worker tests and the separate network-isolated native matrices do not establish live AWS/IAM or company compatibility. See the [planning behavior and boundaries](docs/operator-guide.md#native-planning).
 
 ## Local development

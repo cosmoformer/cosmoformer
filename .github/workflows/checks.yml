@@ -24,7 +24,7 @@ jobs:
           POSTGRES_HOST_AUTH_METHOD: trust
           POSTGRES_DB: cosmoformer_test_control
         ports: ['5432:5432']
-        options: --health-cmd "pg_isready -U postgres -d cosmoformer_test_control" --health-interval 5s --health-timeout 5s --health-retries 12
+        options: --label cosmoformer.local=test --health-cmd "pg_isready -U postgres -d cosmoformer_test_control" --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -32,6 +32,8 @@ jobs:
       - uses: ./.github/actions/test-tools
       - run: node scripts/dev.mjs ci-test-init ${{ job.services.postgres.id }}
       - run: make test-ci-go CI_GO_PRODUCER=backend
+        env:
+          COSMOFORMER_TEST_PG_CONTAINER: ${{ job.services.postgres.id }}
       - run: go vet -tags=integration ./...
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

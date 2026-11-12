@@ -35,6 +35,8 @@ func run() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	switch os.Args[1] {
+	case "maintenance", "rotate-key", "backup-hold", "clock-reset", "restore-begin", "restore-reconcile":
+		return maintenanceCommand(ctx, os.Args[1], os.Args[2:])
 	case "register-key":
 		if len(os.Args) != 2 {
 			return errors.New("register-key accepts no arguments")
@@ -57,6 +59,9 @@ func run() error {
 			return errors.New("operator database connection unavailable")
 		}
 		defer conn.Close(ctx)
+		if _, e = conn.Exec(ctx, `SELECT pg_advisory_lock(707133,13)`); e != nil {
+			return e
+		}
 		tx, e := conn.Begin(ctx)
 		if e != nil {
 			return e
@@ -239,6 +244,9 @@ func admin(ctx context.Context, command string, args []string) error {
 	var owner bool
 	if e = c.QueryRow(ctx, `SELECT current_user='cosmoformer_owner'`).Scan(&owner); e != nil || !owner {
 		return errors.New("this host command requires the migration owner")
+	}
+	if _, e = c.Exec(ctx, `SELECT pg_advisory_lock(707133,13)`); e != nil {
+		return e
 	}
 	tx, e := c.Begin(ctx)
 	if e != nil {

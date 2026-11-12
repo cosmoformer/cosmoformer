@@ -206,8 +206,21 @@ func (a *Server) registerRecovery(api huma.API) {
 			if e = ev.Validate(); e != nil {
 				return nil, problem(ctx, 422, "Supply bounded, non-secret stop and reconciliation statements and protected references.")
 			}
-			if e = coordinator.StopRecovery(ctx, tx, r.Attempt, ev.Stop); e != nil {
-				return nil, workerError(ctx, e)
+			if r.Attempt != "" {
+				if e = coordinator.StopRecovery(ctx, tx, r.Attempt, ev.Stop); e != nil {
+					return nil, workerError(ctx, e)
+				}
+			} else {
+				// A restored/adopted backend can have no surviving attempt.
+				// Only explicit manual evidence can establish its stop facts;
+				// never invent native agent authority or close other attempts.
+				var unresolved bool
+				if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM cosmoformer.attempts WHERE target_id=$1 AND closed_at IS NULL)`, r.Target).Scan(&unresolved); e != nil {
+					return nil, e
+				}
+				if ev.Stop.Method == "agent" || unresolved {
+					return nil, store.ErrConflict
+				}
 			}
 			if _, e = tx.Exec(ctx, `UPDATE cosmoformer.recovery_cases SET evidence=$2,stop_verified=true,reconciliation_complete=$3,revision=revision+1 WHERE id=$1`, r.ID, jsonBytes(ev), ev.Reconciliation.Complete); e != nil {
 				return nil, e
@@ -274,13 +287,13 @@ func (a *Server) registerRecovery(api huma.API) {
 			if _, e = tx.Exec(ctx, `UPDATE cosmoformer.recovery_cases SET status='cleared',cleared_at=clock_timestamp(),cleared_by=$2,revision=revision+1 WHERE id=$1`, r.ID, actor.ID); e != nil {
 				return nil, e
 			}
-			if _, e = tx.Exec(ctx, `UPDATE cosmoformer.operations SET status='failed',terminal_reason='recovery_completed',revision=revision+1 WHERE status='needs_attention' AND id IN(SELECT operation_id FROM cosmoformer.attempts WHERE target_id=$2 AND closed_at IS NOT NULL) AND EXISTS(SELECT FROM cosmoformer.recovery_cases rc WHERE rc.origin_attempt_id=$1 AND rc.target_id=$2 AND rc.status='cleared')`, r.Attempt, r.Target); e != nil {
+			if _, e = tx.Exec(ctx, `UPDATE cosmoformer.operations SET status='failed',terminal_reason='recovery_completed',revision=revision+1 WHERE status='needs_attention' AND id IN(SELECT operation_id FROM cosmoformer.attempts WHERE target_id=$2 AND closed_at IS NOT NULL) AND EXISTS(SELECT FROM cosmoformer.recovery_cases rc WHERE rc.id=$1 AND rc.target_id=$2 AND rc.status='cleared')`, r.ID, r.Target); e != nil {
 				return nil, e
 			}
 			if _, e = tx.Exec(ctx, `UPDATE cosmoformer.artifact_holds SET released_at=clock_timestamp() WHERE owner_kind='recovery' AND owner_id=$1 AND released_at IS NULL`, r.ID); e != nil {
 				return nil, e
 			}
-			if _, e = tx.Exec(ctx, `UPDATE cosmoformer.artifact_holds SET released_at=clock_timestamp() WHERE owner_kind='operation' AND owner_id IN(SELECT a.operation_id FROM cosmoformer.attempts a JOIN cosmoformer.operations o ON o.id=a.operation_id WHERE a.target_id=$2 AND a.closed_at IS NOT NULL AND o.status IN ('failed','succeeded','cancelled','retired')) AND released_at IS NULL AND EXISTS(SELECT FROM cosmoformer.recovery_cases WHERE origin_attempt_id=$1 AND target_id=$2 AND status='cleared')`, r.Attempt, r.Target); e != nil {
+			if _, e = tx.Exec(ctx, `UPDATE cosmoformer.artifact_holds SET released_at=clock_timestamp() WHERE owner_kind='operation' AND owner_id IN(SELECT a.operation_id FROM cosmoformer.attempts a JOIN cosmoformer.operations o ON o.id=a.operation_id WHERE a.target_id=$2 AND a.closed_at IS NOT NULL AND o.status IN ('failed','succeeded','cancelled','retired')) AND released_at IS NULL AND EXISTS(SELECT FROM cosmoformer.recovery_cases WHERE id=$1 AND target_id=$2 AND status='cleared')`, r.ID, r.Target); e != nil {
 				return nil, e
 			}
 			if e = store.Audit(ctx, tx, in.Org, actor.ID, "recovery.clear", r.ID); e != nil {
