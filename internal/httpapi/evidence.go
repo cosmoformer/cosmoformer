@@ -172,16 +172,14 @@ func (a *Server) registerEvidence(api huma.API) {
 				}
 				if attempt != in.ID {
 					var allowed bool
-					e = q.QueryRow(ctx, `SELECT EXISTS(SELECT FROM cosmoformer.artifacts a JOIN cosmoformer.operations o ON o.plan_id=a.plan_id JOIN cosmoformer.attempts t ON t.operation_id=o.id JOIN cosmoformer.work_items w ON w.id=t.work_item_id WHERE a.id=$1 AND t.id=$2 AND o.kind='apply' AND w.phase='execution' AND t.state IN ('claimed','preparing','ready') AND a.state='finalized' AND NOT EXISTS(SELECT FROM cosmoformer.cleanup_claims WHERE artifact_id=a.id))`, in.Artifact, in.ID).Scan(&allowed)
+					e = q.QueryRow(ctx, `SELECT EXISTS(SELECT FROM cosmoformer.artifacts a JOIN cosmoformer.operations o ON o.plan_id=a.plan_id JOIN cosmoformer.attempts t ON t.operation_id=o.id JOIN cosmoformer.work_items w ON w.id=t.work_item_id WHERE a.id=$1 AND t.id=$2 AND o.kind='apply' AND w.phase='execution' AND t.state IN ('claimed','preparing','ready') AND a.id::text IN (SELECT jsonb_array_elements_text(t.execution_spec->'retained_plan'->'artifact_ids')) AND EXISTS(SELECT FROM cosmoformer.artifact_holds WHERE artifact_id=a.id AND owner_kind='operation' AND owner_id=o.id AND released_at IS NULL) AND EXISTS(SELECT FROM cosmoformer.artifact_holds WHERE artifact_id=a.id AND owner_kind='attempt' AND owner_id=t.id AND released_at IS NULL) AND a.state='finalized' AND NOT EXISTS(SELECT FROM cosmoformer.cleanup_claims WHERE artifact_id=a.id))`, in.Artifact, in.ID).Scan(&allowed)
 					if e != nil {
 						return e
 					}
 					if !allowed {
 						return store.ErrForbidden
 					}
-					if _, e = q.Exec(ctx, `INSERT INTO cosmoformer.artifact_holds(org_id,artifact_id,owner_kind,owner_id,reason) SELECT org_id,id,'attempt',$2,'retained_preparation' FROM cosmoformer.artifacts WHERE id=$1 ON CONFLICT DO NOTHING`, in.Artifact, in.ID); e != nil {
-						return e
-					}
+
 				}
 				if kind != "log_segment" {
 					var phase string

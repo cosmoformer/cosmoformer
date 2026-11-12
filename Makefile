@@ -77,7 +77,7 @@ test-unit:
 	$(GO) vet ./...
 
 test-integration:
-	$(GO) test -race -tags=integration ./internal/store ./internal/coordinator ./internal/httpapi ./cmd/... ./tests/acceptance $(TEST_ARGS)
+	$(GO) test -race -timeout=30m -tags=integration ./internal/store ./internal/coordinator ./internal/httpapi ./cmd/... ./tests/acceptance $(TEST_ARGS)
 
 # Preserve the same marked database selection and tool/cache environment as the
 # ordinary local checks when CI invokes an individual Go coverage producer.
@@ -152,7 +152,7 @@ test-go-coverage: test-linux-coverage
 	mkdir -p .build/coverage
 	@set -eu; cover_dir=$$(mktemp -d "$(CURDIR)/.build/coverage/go-raw.XXXXXX"); \
 	trap 'rm -rf "$$cover_dir"' EXIT; \
-	COSMOFORMER_TEST_COVER_DIR="$$cover_dir" $(GO) test -race -count=1 -timeout=20m -tags=integration -covermode=atomic -coverpkg=./internal/...,./cmd/... ./internal/... ./cmd/... ./tests/acceptance -args -test.gocoverdir="$$cover_dir"; \
+	COSMOFORMER_TEST_COVER_DIR="$$cover_dir" $(GO) test -race -count=1 -timeout=30m -tags=integration -covermode=atomic -coverpkg=./internal/...,./cmd/... ./internal/... ./cmd/... ./tests/acceptance -args -test.gocoverdir="$$cover_dir"; \
 	$(GO) tool covdata textfmt -i="$$cover_dir" -o=.build/coverage/go.host.out
 	mkdir -p .build/coverage/scripts
 	$(NODE) --test --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=.build/coverage/scripts/lcov.info scripts/merge-go-coverage.test.mjs scripts/check-go-coverage.test.mjs

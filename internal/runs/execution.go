@@ -40,11 +40,50 @@ type ExecutionAWS struct {
 	Bootstrap      string `json:"expected_bootstrap_principal"`
 	SessionSeconds int64  `json:"session_seconds"`
 }
+type RetainedArtifact struct {
+	ID      string `json:"id"`
+	Kind    string `json:"kind"`
+	Hash    string `json:"sha256"`
+	Size    int64  `json:"size"`
+	Version string `json:"version_id"`
+}
 type RetainedPlan struct {
-	ID             string   `json:"plan_id"`
-	Revision       int64    `json:"revision"`
-	ManifestDigest string   `json:"manifest_digest"`
-	Artifacts      []string `json:"artifact_ids"`
+	Records        []RetainedArtifact `json:"artifacts"`
+	ID             string             `json:"plan_id"`
+	Revision       int64              `json:"revision"`
+	ManifestDigest string             `json:"manifest_digest"`
+	Artifacts      []string           `json:"artifact_ids"`
+}
+
+// Valid checks the bounded, non-secret exact restoration capability. Current
+// custody, grants and plan eligibility are independently checked by the server.
+func (p *RetainedPlan) Valid() bool {
+	if p == nil || !catalog.UUID(p.ID) || p.Revision < 1 || !ValidDigest(p.ManifestDigest) || len(p.Artifacts) < 7 || len(p.Artifacts) > 8 || len(p.Records) != len(p.Artifacts) {
+		return false
+	}
+	ids := map[string]bool{}
+	kinds := map[string]bool{}
+	for i, r := range p.Records {
+		if !catalog.UUID(r.ID) || r.ID != p.Artifacts[i] || ids[r.ID] || kinds[r.Kind] || !ValidDigest(r.Hash) || r.Size < 0 || r.Size > 67108864 || r.Version == "" || r.Version == "null" {
+			return false
+		}
+		switch r.Kind {
+		case "pre_init_spec", "manifest", "binary_plan", "raw_plan_json", "provider_schema", "normalized_changes", "findings", "provider_lock":
+		default:
+			return false
+		}
+		if r.Kind == "manifest" && r.Hash != p.ManifestDigest {
+			return false
+		}
+		ids[r.ID] = true
+		kinds[r.Kind] = true
+	}
+	for _, kind := range []string{"pre_init_spec", "manifest", "binary_plan", "raw_plan_json", "provider_schema", "normalized_changes", "findings"} {
+		if !kinds[kind] {
+			return false
+		}
+	}
+	return true
 }
 
 func (s ExecutionSpec) Preflight() PreflightSpec {
@@ -124,6 +163,9 @@ func (s ExecutionSpec) Validate() error {
 		if len(parts) != 6 || parts[4] != s.AWS.Account {
 			return Fail("BACKEND_MISMATCH")
 		}
+	}
+	if s.RetainedPlan != nil && !s.RetainedPlan.Valid() {
+		return Fail("INVALID_SPEC")
 	}
 	return nil
 }

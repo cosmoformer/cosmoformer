@@ -189,3 +189,87 @@ func TestMapBlockSchemaSensitivity(t *testing.T) {
 		})
 	}
 }
+
+func TestNestedUnknownMarkers(t *testing.T) {
+	const provider = "registry.opentofu.org/example/nested"
+	const address = "nested_item.fixture"
+	const placeholder = "never-render-native-placeholder"
+	for _, kind := range []string{"attribute", "block"} {
+		for _, mode := range []string{"single", "map", "list", "set"} {
+			for _, scenario := range []string{"partial", "whole", "wrong collection", "unknown field", "wrong scalar"} {
+				t.Run(kind+"/"+mode+"/"+scenario, func(t *testing.T) {
+					wrap := func(value any) any {
+						switch mode {
+						case "map":
+							return map[string]any{"slot": value}
+						case "list", "set":
+							return []any{value}
+						default:
+							return value
+						}
+					}
+					fields := map[string]any{"private": map[string]any{"type": "string"}, "safe": map[string]any{"type": "string"}}
+					block := map[string]any{"attributes": map[string]any{"items": map[string]any{"optional": true, "nested_type": map[string]any{"nesting_mode": mode, "attributes": fields}}}}
+					if kind == "block" {
+						block = map[string]any{"block_types": map[string]any{"items": map[string]any{"nesting_mode": mode, "block": map[string]any{"attributes": fields}}}}
+					}
+					schema, err := json.Marshal(map[string]any{"format_version": "1.0", "provider_schemas": map[string]any{provider: map[string]any{"provider": map[string]any{"version": 0, "block": map[string]any{}}, "resource_schemas": map[string]any{"nested_item": map[string]any{"version": 0, "block": block}}}}})
+					if err != nil {
+						t.Fatal(err)
+					}
+					marker := wrap(map[string]any{"private": true})
+					switch scenario {
+					case "whole":
+						marker = true
+					case "wrong collection":
+						if mode == "list" || mode == "set" {
+							marker = map[string]any{"private": true}
+						} else {
+							marker = []any{map[string]any{"private": true}}
+						}
+					case "unknown field":
+						marker = wrap(map[string]any{"undeclared": true})
+					case "wrong scalar":
+						marker = wrap(map[string]any{"private": []any{true}})
+					}
+					change := map[string]any{"actions": []string{"update"}, "before": map[string]any{"items": wrap(map[string]any{"private": "prior-known", "safe": "visible"})}, "after": map[string]any{"items": wrap(map[string]any{"private": placeholder, "safe": "visible"})}, "after_unknown": map[string]any{"items": marker}, "before_sensitive": map[string]any{}, "after_sensitive": map[string]any{}}
+					raw, err := json.Marshal(map[string]any{"format_version": "1.2", "terraform_version": "1.13.8", "planned_values": map[string]any{}, "configuration": map[string]any{}, "resource_changes": []any{map[string]any{"address": address, "name": "fixture", "type": "nested_item", "mode": "managed", "provider_name": provider, "change": change}}})
+					if err != nil {
+						t.Fatal(err)
+					}
+					out, err := plan.Analyze(raw, schema, plan.Options{Engine: "opentofu", Version: "1.13.8", ProfileID: plan.ProfileID("opentofu"), Providers: []runs.Provider{{Address: provider, Version: "1.0.0", Platform: "linux_amd64", Hashes: []string{"h1:fixture"}}}, ResourceIDs: map[string]string{address: "11111111-1111-4111-8111-111111111111"}, Secrets: &evidence.Registry{}})
+					if scenario != "partial" && scenario != "whole" {
+						if err == nil || out != nil {
+							t.Fatal("malformed unknown marker produced review evidence")
+						}
+						return
+					}
+					if err != nil || out == nil || len(out.Resources) != 1 || len(out.Resources[0].Paths) != 1 {
+						t.Fatal("valid nested unknown marker rejected", err)
+					}
+					encoded, err := json.Marshal(out)
+					if err != nil || bytes.Contains(encoded, []byte(placeholder)) {
+						t.Fatal("unknown native placeholder entered review evidence", err)
+					}
+					value := out.Resources[0].Paths[0].After
+					if scenario == "whole" {
+						if value.State != "unknown" {
+							t.Fatal("whole collection lost unknown state", value.State)
+						}
+						return
+					}
+					switch mode {
+					case "map":
+						value = value.Value.(map[string]plan.Value)["slot"]
+					case "list", "set":
+						value = value.Value.([]plan.Value)[0]
+					}
+					values := value.Value.(map[string]plan.Value)
+					if values["private"].State != "unknown" || values["safe"].State != "known" || values["safe"].Value != "visible" {
+						t.Fatal("partial unknown marker lost uncertainty or safe sibling", values)
+					}
+				})
+			}
+		}
+	}
+}

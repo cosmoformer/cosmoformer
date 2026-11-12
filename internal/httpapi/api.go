@@ -38,13 +38,13 @@ func New(s *store.Store, origin string) (http.Handler, huma.API) {
 }
 
 type Options struct {
-	Evidence                                    *evidence.Custody
-	Clock                                       clock.Source
-	Bitbucket                                   *bitbucket.Client
-	Cipher                                      *cryptostore.Cipher
-	Background                                  context.Context
-	NativeEvidence                              coordinator.NativeEvidenceVerifier
-	PlanSeconds, PreflightSeconds, PlanTTLHours int64
+	Evidence                                                  *evidence.Custody
+	Clock                                                     clock.Source
+	Bitbucket                                                 *bitbucket.Client
+	Cipher                                                    *cryptostore.Cipher
+	Background                                                context.Context
+	NativeEvidence                                            coordinator.NativeEvidenceVerifier
+	PlanSeconds, ApplySeconds, PreflightSeconds, PlanTTLHours int64
 }
 
 func NewWithOptions(s *store.Store, origin string, options Options) (http.Handler, huma.API) {
@@ -63,6 +63,9 @@ func NewWithOptions(s *store.Store, origin string, options Options) (http.Handle
 	}
 	if options.PlanSeconds != 0 {
 		server.Coordinator.PlanSeconds = options.PlanSeconds
+	}
+	if options.ApplySeconds != 0 {
+		server.Coordinator.ApplySeconds = options.ApplySeconds
 	}
 	if options.PreflightSeconds != 0 {
 		server.Coordinator.PreflightSeconds = options.PreflightSeconds
@@ -88,8 +91,9 @@ func NewWithOptions(s *store.Store, origin string, options Options) (http.Handle
 	server.registerPreflights(api)
 	server.registerPlanningReads(api)
 	server.registerApprovals(api)
- server.registerControls(api)
- server.registerRecovery(api)
+	server.registerApply(api)
+	server.registerControls(api)
+	server.registerRecovery(api)
 	server.registerWorkspace(api)
 	server.registerWorker(api)
 	server.registerEvidence(api)

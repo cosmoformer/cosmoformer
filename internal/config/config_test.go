@@ -105,3 +105,19 @@ func TestRawEncryptionKeyDoesNotTrimBinaryBytes(t *testing.T) {
 		t.Fatal("public key file accepted")
 	}
 }
+
+func TestApplyBudget(t *testing.T) {
+	t.Setenv("COSMOFORMER_ORIGIN", "https://localhost:5173")
+	t.Setenv("COSMOFORMER_DATABASE_DSN_FILE", "protected.dsn")
+	t.Setenv("COSMOFORMER_APPLY_SECONDS", "")
+	c, e := Load()
+	if e != nil || c.ApplySeconds != 2400 {
+		t.Fatal(c.ApplySeconds, e)
+	}
+	for _, v := range []string{"29", "3301", "bad"} {
+		t.Setenv("COSMOFORMER_APPLY_SECONDS", v)
+		if _, e = Load(); e == nil {
+			t.Fatal("invalid Apply cap accepted", v)
+		}
+	}
+}

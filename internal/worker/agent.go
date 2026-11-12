@@ -254,7 +254,7 @@ func (a *Agent) RunOne(ctx context.Context) error {
 	}
 	b, _ := catalog.Canonical(assignment.Spec)
 	if assignment.Phase == "execution" {
-		if assignment.Execution == nil || assignment.Execution.Validate() != nil || assignment.Kind != "plan" {
+		if assignment.Execution == nil || assignment.Execution.Validate() != nil || (assignment.Kind != "plan" && assignment.Kind != "apply") {
 			return ErrAgent
 		}
 		b, _ = catalog.Canonical(assignment.Execution)

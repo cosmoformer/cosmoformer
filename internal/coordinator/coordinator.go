@@ -31,13 +31,14 @@ type Coordinator struct {
 	ObserveSource    func(context.Context, string, string) (bitbucket.Facts, error)
 	NativeEvidence   NativeEvidenceVerifier
 	PlanSeconds      int64
+	ApplySeconds     int64
 	PreflightSeconds int64
 	PlanTTLHours     int64
 	ManagedSecrets   func(context.Context, pgx.Tx, string, runs.ExecutionSpec) ([]runs.EnvSecret, error)
 }
 
 func New(s *store.Store, c clock.Source) *Coordinator {
-	return &Coordinator{Store: s, Clock: c, Instance: runs.ID(), PlanSeconds: 1200, PreflightSeconds: 300, PlanTTLHours: 168, NativeEvidence: plan.Verifier{}}
+	return &Coordinator{Store: s, Clock: c, Instance: runs.ID(), PlanSeconds: 1200, ApplySeconds: 2400, PreflightSeconds: 300, PlanTTLHours: 168, NativeEvidence: plan.Verifier{}}
 }
 func digest(v any) []byte    { b, _ := catalog.Canonical(v); h := sha256.Sum256(b); return h[:] }
 func hexDigest(v any) string { return hex.EncodeToString(digest(v)) }
@@ -163,13 +164,16 @@ func (c *Coordinator) Poll(ctx context.Context, token string, in runs.Poll) (*ru
 		return nil, runs.Fail("INVALID_REQUEST")
 	}
 	var out *runs.Assignment
+	var clockDenied error
 	e := c.workerTx(ctx, token, func(tx pgx.Tx, w Worker) error {
 		if e := c.current(ctx, tx, w, in.Identity, true); e != nil {
 			return e
 		}
 		tick, e := c.Clock.Now()
 		if e != nil {
-			return runs.Fail("CLOCK_UNAVAILABLE")
+			clockDenied = runs.Fail("CLOCK_UNRELIABLE")
+			_, e = tx.Exec(ctx, `SELECT cosmoformer.execution_clock_failed()`)
+			return e
 		}
 		var old []byte
 		var oldDigest []byte
@@ -202,7 +206,7 @@ func (c *Coordinator) Poll(ctx context.Context, token string, in runs.Poll) (*ru
 				Phase                               string
 				Execution                           *runs.ExecutionSpec
 			}
-			rows, e := tx.Query(ctx, `SELECT wi.id::text,o.id::text,o.run_id::text,o.stack_id::text,wi.assignment_spec,wi.phase FROM cosmoformer.work_items wi JOIN cosmoformer.operations o ON o.id=wi.operation_id JOIN cosmoformer.stacks s ON s.id=o.stack_id WHERE wi.status='queued' AND wi.phase IN ('preflight','execution') AND (wi.phase='preflight' OR o.native_planning AND o.kind='plan' AND s.assessment='compatible') AND EXISTS(SELECT FROM cosmoformer.workers cw WHERE cw.id=$2 AND cw.capabilities->'supported_work_phases' ? wi.phase) AND o.status='queued' AND NOT o.cancel_requested AND NOT s.archived AND wi.assignment_spec->'pool'->>'id'=$1 AND wi.assignment_spec->'engine'->>'runtime_id'=(SELECT runtime_id::text FROM cosmoformer.workers WHERE id=$2) ORDER BY CASE o.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,o.ordering_at,o.id`, w.PoolID, w.ID)
+			rows, e := tx.Query(ctx, `SELECT wi.id::text,o.id::text,o.run_id::text,o.stack_id::text,wi.assignment_spec,wi.phase FROM cosmoformer.work_items wi JOIN cosmoformer.operations o ON o.id=wi.operation_id JOIN cosmoformer.stacks s ON s.id=o.stack_id WHERE wi.status='queued' AND wi.phase IN ('preflight','execution') AND (wi.phase='preflight' OR (o.native_planning AND o.kind='plan' OR o.kind='apply') AND s.assessment='compatible') AND EXISTS(SELECT FROM cosmoformer.workers cw WHERE cw.id=$2 AND cw.capabilities->'supported_work_phases' ? wi.phase) AND o.status='queued' AND NOT o.cancel_requested AND NOT s.archived AND wi.assignment_spec->'pool'->>'id'=$1 AND wi.assignment_spec->'engine'->>'runtime_id'=(SELECT runtime_id::text FROM cosmoformer.workers WHERE id=$2) ORDER BY CASE o.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,o.ordering_at,o.id`, w.PoolID, w.ID)
 			if e != nil {
 				return e
 			}
@@ -233,9 +237,41 @@ func (c *Coordinator) Poll(ctx context.Context, token string, in runs.Poll) (*ru
 				return e
 			}
 			for _, v := range all {
+				if v.Execution != nil && v.Execution.RetainedPlan != nil {
+					good := false
+					tick, e = c.Clock.Now()
+					if e != nil {
+						clockDenied = runs.Fail("CLOCK_UNRELIABLE")
+						_, e = tx.Exec(ctx, `SELECT cosmoformer.execution_clock_failed()`)
+						return e
+					}
+					if e = tx.QueryRow(ctx, `SELECT cosmoformer.execution_clock_observe($1,$2)`, c.Instance, int64(tick)).Scan(&good); e != nil {
+						return e
+					}
+					if !good {
+						clockDenied = runs.Fail("CLOCK_UNRELIABLE")
+						return nil
+					}
+					e = ApplyEligibility(ctx, tx, v.StackID, *v.Execution)
+					if e == nil {
+						e = applyOperationHolds(ctx, tx, *v.Execution, v.OperationID)
+					}
+					if e != nil {
+						if runs.Code(e) == "" {
+							return e
+						}
+						if _, e = tx.Exec(ctx, `UPDATE cosmoformer.operations SET status='retired',retired_at=clock_timestamp(),terminal_reason='APPLY_ELIGIBILITY_LOST',revision=revision+1 WHERE id=$1`, v.OperationID); e != nil {
+							return e
+						}
+						if _, e = tx.Exec(ctx, `UPDATE cosmoformer.work_items SET status='retired',revision=revision+1 WHERE id=$1`, v.WorkID); e != nil {
+							return e
+						}
+						continue
+					}
+				}
 				if e = c.authority(ctx, tx, v.OperationID, v.Spec); e != nil {
 					if errors.Is(e, store.ErrForbidden) || runs.Code(e) == "INPUTS_CHANGED" || runs.Code(e) == "SOURCE_CHANGED" || runs.Code(e) == "RECOVERY_EVIDENCE_CHANGED" {
-						_, err := tx.Exec(ctx, `UPDATE cosmoformer.operations SET status='retired',terminal_reason='ELIGIBILITY_CHANGED',revision=revision+1 WHERE id=$1`, v.OperationID)
+						_, err := tx.Exec(ctx, `UPDATE cosmoformer.operations SET status='retired',retired_at=clock_timestamp(),terminal_reason='ELIGIBILITY_CHANGED',revision=revision+1 WHERE id=$1`, v.OperationID)
 						if err != nil {
 							return err
 						}
@@ -272,6 +308,9 @@ func (c *Coordinator) Poll(ctx context.Context, token string, in runs.Poll) (*ru
 				}
 				if v.Execution != nil {
 					capSeconds = c.PlanSeconds
+					if v.Execution.RetainedPlan != nil {
+						capSeconds = c.ApplySeconds
+					}
 					if capSeconds == 0 {
 						capSeconds = 1200
 					}
@@ -302,10 +341,14 @@ func (c *Coordinator) Poll(ctx context.Context, token string, in runs.Poll) (*ru
 					if e != nil {
 						return e
 					}
-					if tag, insertErr := tx.Exec(ctx, `INSERT INTO cosmoformer.plans(org_id,operation_id,attempt_id,stack_id,target_id,status,provenance,source_facts_revision,state_epoch,rule_version,profile_id,recovery_case_id,recovery_evidence_revision) VALUES($1,$2,$3,$4,$5,'assembling',$10,$6,$7,$8,$9,$11,$12) ON CONFLICT(operation_id) DO UPDATE SET attempt_id=excluded.attempt_id,state_epoch=excluded.state_epoch,revision=cosmoformer.plans.revision+1 WHERE cosmoformer.plans.status='assembling' AND NOT EXISTS(SELECT FROM cosmoformer.attempts WHERE id=cosmoformer.plans.attempt_id AND ever_permitted)`, w.OrgID, v.OperationID, attempt, v.StackID, target, v.Spec.Source.FactsRevision, claimed.StateEpoch, v.Execution.RuleVersion, v.Execution.ProfileID, v.Execution.Provenance().Kind, nullable(v.Execution.Provenance().Case), nullableRevision(v.Execution.Provenance().Revision)); insertErr != nil {
-						return insertErr
-					} else if tag.RowsAffected() != 1 {
-						return runs.Fail("PLAN_NOT_ASSEMBLING")
+					if v.Execution.RetainedPlan == nil {
+						if tag, insertErr := tx.Exec(ctx, `INSERT INTO cosmoformer.plans(org_id,operation_id,attempt_id,stack_id,target_id,status,provenance,source_facts_revision,state_epoch,rule_version,profile_id,recovery_case_id,recovery_evidence_revision) VALUES($1,$2,$3,$4,$5,'assembling',$10,$6,$7,$8,$9,$11,$12) ON CONFLICT(operation_id) DO UPDATE SET attempt_id=excluded.attempt_id,state_epoch=excluded.state_epoch,revision=cosmoformer.plans.revision+1 WHERE cosmoformer.plans.status='assembling' AND NOT EXISTS(SELECT FROM cosmoformer.attempts WHERE id=cosmoformer.plans.attempt_id AND ever_permitted)`, w.OrgID, v.OperationID, attempt, v.StackID, target, v.Spec.Source.FactsRevision, claimed.StateEpoch, v.Execution.RuleVersion, v.Execution.ProfileID, v.Execution.Provenance().Kind, nullable(v.Execution.Provenance().Case), nullableRevision(v.Execution.Provenance().Revision)); insertErr != nil {
+							return insertErr
+						} else if tag.RowsAffected() != 1 {
+							return runs.Fail("PLAN_NOT_ASSEMBLING")
+						}
+					} else if e = HoldApply(ctx, tx, *v.Execution, "attempt", attempt); e != nil {
+						return e
 					}
 					if e = c.executionAuthority(ctx, tx, *claimed); e != nil {
 						return e
@@ -333,6 +376,9 @@ func (c *Coordinator) Poll(ctx context.Context, token string, in runs.Poll) (*ru
 		_, e = tx.Exec(ctx, `INSERT INTO cosmoformer.worker_requests(org_id,worker_id,request_id,generation,agent_instance,request_digest,response) VALUES($1,$2,$3,$4,$5,$6,$7)`, w.OrgID, w.ID, in.RequestID, in.Generation, in.Agent, digest(in), mustJSON(out))
 		return e
 	})
+	if e == nil && clockDenied != nil {
+		return nil, clockDenied
+	}
 	return out, e
 }
 func (c *Coordinator) assignment(ctx context.Context, tx pgx.Tx, id string) (*runs.Assignment, error) {
@@ -398,9 +444,9 @@ func (c *Coordinator) authority(ctx context.Context, tx pgx.Tx, operation string
 		}
 	}
 
-	var requester, project, env, repo string
+	var requester, project, env, repo, kind string
 	var enabled bool
-	e := tx.QueryRow(ctx, `SELECT coalesce(o.requester_id::text,''),s.project_id::text,s.environment_id::text,s.repository_id::text,coalesce(cosmoformer.requester_enabled(o.requester_id),false) FROM cosmoformer.operations o JOIN cosmoformer.stacks s ON s.id=o.stack_id JOIN cosmoformer.repositories r ON r.id=s.repository_id WHERE o.id=$1 AND NOT s.archived AND r.enabled AND s.effective_revision_id=$2 AND NOT (o.native_planning AND o.recovery_case_id IS NULL AND EXISTS(SELECT FROM cosmoformer.recovery_cases rc WHERE rc.stack_id=o.stack_id AND rc.status='cleared' AND o.accepted_at<=rc.cleared_at))`, operation, s.StackRevisionID).Scan(&requester, &project, &env, &repo, &enabled)
+	e := tx.QueryRow(ctx, `SELECT coalesce(o.requester_id::text,''),s.project_id::text,s.environment_id::text,s.repository_id::text,coalesce(cosmoformer.requester_enabled(o.requester_id),false),o.kind FROM cosmoformer.operations o JOIN cosmoformer.stacks s ON s.id=o.stack_id JOIN cosmoformer.repositories r ON r.id=s.repository_id WHERE o.id=$1 AND NOT s.archived AND r.enabled AND s.effective_revision_id=$2 AND NOT (o.native_planning AND o.recovery_case_id IS NULL AND EXISTS(SELECT FROM cosmoformer.recovery_cases rc WHERE rc.stack_id=o.stack_id AND rc.status='cleared' AND o.accepted_at<=rc.cleared_at))`, operation, s.StackRevisionID).Scan(&requester, &project, &env, &repo, &enabled, &kind)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return runs.Fail("INPUTS_CHANGED")
 	}
@@ -415,7 +461,11 @@ func (c *Coordinator) authority(ctx context.Context, tx pgx.Tx, operation string
 		if e != nil {
 			return e
 		}
-		if !access.Allows(g, project, env, access.Plan) {
+		action := access.Plan
+		if kind == "apply" {
+			action = access.Apply
+		}
+		if !access.Allows(g, project, env, action) {
 			return store.ErrForbidden
 		}
 	}

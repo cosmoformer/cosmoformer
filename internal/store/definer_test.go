@@ -90,6 +90,13 @@ func TestVersionEightDefinerUpgrade(t *testing.T) {
 	db, c, fingerprint := quotaConnection(t)
 	// Restore the exact version-8 function setting without rewriting migrations.
 	sqlOK(t, db.Owner, `
+ DROP FUNCTION cosmoformer.count_plan_approvals(uuid);
+ DROP FUNCTION cosmoformer.release_operation_holds() CASCADE;
+ DROP FUNCTION cosmoformer.retire_queued_applies() CASCADE;
+ DROP FUNCTION cosmoformer.apply_spawn_epoch() CASCADE;
+ DROP FUNCTION cosmoformer.execution_clock_failed();
+ DROP FUNCTION cosmoformer.apply_operation_identity() CASCADE;
+ DROP TABLE cosmoformer.apply_start_events;
  DROP FUNCTION cosmoformer.recovery_approval_event_integrity() CASCADE;
  DROP FUNCTION cosmoformer.control_identity() CASCADE;
  DROP FUNCTION cosmoformer.recovery_identity() CASCADE;
@@ -126,7 +133,7 @@ func TestVersionEightDefinerUpgrade(t *testing.T) {
 	snapshot := func() string {
 		t.Helper()
 		var value string
-		if err := db.Owner.QueryRow(context.Background(), `SELECT jsonb_agg(jsonb_build_array(p.oid,p.proowner,p.proacl,p.prosrc) ORDER BY p.oid)::text FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='cosmoformer' AND p.prosecdef AND p.proname NOT IN ('invalidate_runtime_plans','invalidate_epoch_plans')`).Scan(&value); err != nil {
+		if err := db.Owner.QueryRow(context.Background(), `SELECT jsonb_agg(jsonb_build_array(p.oid,p.proowner,p.proacl,p.prosrc) ORDER BY p.oid)::text FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='cosmoformer' AND p.prosecdef AND p.proname NOT IN ('invalidate_runtime_plans','invalidate_epoch_plans','retire_queued_applies','apply_spawn_epoch','execution_clock_failed')`).Scan(&value); err != nil {
 			t.Fatal(err)
 		}
 		return value

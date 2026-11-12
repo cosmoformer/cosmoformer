@@ -33,6 +33,8 @@ type WithdrawInput struct {
 	}
 }
 type ApprovalSummary struct {
+	CanApply         bool       `json:"can_apply,omitempty"`
+	ApplyReasons     []string   `json:"apply_blocked_reasons,omitempty"`
 	PlanID           string     `json:"plan_id" format:"uuid"`
 	Revision         int64      `json:"revision" minimum:"1" maximum:"9007199254740991"`
 	Manifest         string     `json:"manifest_digest"`
@@ -228,6 +230,30 @@ func (a *Server) approvalSummary(ctx context.Context, tx pgx.Tx, actor store.Act
 	}
 	out.CanApprove = authority && out.Eligible
 	out.CanWithdraw = out.OwnApproved
+	out.ApplyReasons = []string{}
+	if !access.Allows(grants, p.Project, p.Environment, access.Apply) {
+		out.ApplyReasons = append(out.ApplyReasons, "APPLY_AUTHORITY_REQUIRED")
+	} else if reason != "" {
+		out.ApplyReasons = append(out.ApplyReasons, reason)
+	} else {
+		records, err := approvalArtifacts(ctx, tx, p)
+		if err != nil {
+			out.ApplyReasons = append(out.ApplyReasons, "EVIDENCE_UNAVAILABLE")
+		} else {
+			err = coordinator.ApplyEligibility(ctx, tx, p.Stack, retainedSpec(p, records))
+			if err == nil {
+				err = coordinator.ApplyHistory(ctx, tx, p.ID)
+			}
+			if err != nil {
+				if code := runs.Code(err); code != "" {
+					out.ApplyReasons = append(out.ApplyReasons, code)
+				} else {
+					return out, err
+				}
+			}
+		}
+	}
+	out.CanApply = len(out.ApplyReasons) == 0
 	e = tx.QueryRow(ctx, `SELECT max(observed_at) FROM cosmoformer.source_observations WHERE subject_id=$1`, p.Subject).Scan(&out.SourceObservedAt)
 	return out, e
 }

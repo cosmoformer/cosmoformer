@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 
 	"github.com/cosmoformer/cosmoformer/internal/access"
+	"github.com/cosmoformer/cosmoformer/internal/coordinator"
+	"github.com/cosmoformer/cosmoformer/internal/runs"
 	"github.com/cosmoformer/cosmoformer/internal/store"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5"
@@ -29,11 +31,19 @@ type PreflightsOutput struct {
 		Preflights []PreflightPublic `json:"preflights"`
 	}
 }
+type OperationRetryInput struct {
+	OrgIDPath
+	Body struct {
+		Revision          int64 `json:"expected_revision,omitempty" minimum:"1"`
+		OperationRevision int64 `json:"expected_operation_revision,omitempty" minimum:"1"`
+	}
+}
 type PriorityInput struct {
 	OrgIDPath
 	Body struct {
-		Revision int64  `json:"expected_revision" minimum:"1"`
-		Priority string `json:"priority" enum:"low,medium,high"`
+		Revision          int64  `json:"expected_revision,omitempty" minimum:"1"`
+		OperationRevision int64  `json:"expected_operation_revision,omitempty" minimum:"1" maximum:"9007199254740991"`
+		Priority          string `json:"priority" enum:"low,medium,high"`
 	}
 }
 
@@ -78,22 +88,33 @@ func (a *Server) registerPreflights(api huma.API) {
 		return out, e
 	})
 	authorize := func(ctx context.Context, tx pgx.Tx, actor store.Actor, id string, manage bool) error {
-		var project, env string
-		if e := tx.QueryRow(ctx, `SELECT s.project_id::text,s.environment_id::text FROM cosmoformer.operations o JOIN cosmoformer.stacks s ON s.id=o.stack_id WHERE o.id=$1`, id).Scan(&project, &env); e != nil {
+		var project, env, kind string
+		if e := tx.QueryRow(ctx, `SELECT s.project_id::text,s.environment_id::text,o.kind FROM cosmoformer.operations o JOIN cosmoformer.stacks s ON s.id=o.stack_id WHERE o.id=$1`, id).Scan(&project, &env, &kind); e != nil {
 			return store.ErrNotFound
 		}
 		g, e := store.GrantsFor(ctx, tx, actor.ID)
 		if e != nil {
 			return e
 		}
-		if access.Allows(g, project, env, access.Plan) || manage && access.Allows(g, project, env, access.Manage) {
+		action := access.Plan
+		if kind == "apply" {
+			action = access.Apply
+		}
+		if access.Allows(g, project, env, action) || manage && access.Allows(g, project, env, access.Manage) {
 			return nil
 		}
 		return store.ErrForbidden
 	}
-	register(api, "PATCH", "/organizations/{org}/operations/{id}/priority", "preflight-priority", func(ctx context.Context, in *PriorityInput) (*OK, error) {
+	priority := func(ctx context.Context, in *PriorityInput) (*OK, error) {
+		revision := in.Body.Revision
+		if in.Body.OperationRevision > 0 {
+			revision = in.Body.OperationRevision
+		}
+		if revision < 1 || in.Body.Revision > 0 && in.Body.OperationRevision > 0 {
+			return nil, problem(ctx, 422, "One expected operation revision is required.")
+		}
 		return mutate(a, ctx, in.Org, false, func(tx pgx.Tx, actor store.Actor) error { return authorize(ctx, tx, actor, in.ID, true) }, func(tx pgx.Tx, actor store.Actor) (*OK, error) {
-			tag, e := tx.Exec(ctx, `UPDATE cosmoformer.operations SET priority=$3,revision=revision+1 WHERE id=$1 AND revision=$2 AND status='queued' AND NOT EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=$1 AND closed_at IS NULL)`, in.ID, in.Body.Revision, in.Body.Priority)
+			tag, e := tx.Exec(ctx, `UPDATE cosmoformer.operations SET priority=$3,revision=revision+1 WHERE id=$1 AND revision=$2 AND status='queued' AND NOT EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=$1 AND closed_at IS NULL)`, in.ID, revision, in.Body.Priority)
 			if e != nil {
 				return nil, e
 			}
@@ -102,15 +123,37 @@ func (a *Server) registerPreflights(api huma.API) {
 			}
 			return ok(), store.Audit(ctx, tx, in.Org, actor.ID, "preflight.priority", in.ID)
 		})
-	})
-	register(api, "POST", "/organizations/{org}/operations/{id}/retry", "retry-preflight", func(ctx context.Context, in *RevisionInput) (*OK, error) {
+	}
+	register(api, "PATCH", "/organizations/{org}/operations/{id}/priority", "preflight-priority", priority)
+	register(api, "POST", "/organizations/{org}/operations/{id}/priority", "operation-priority", priority)
+	register(api, "POST", "/organizations/{org}/operations/{id}/retry", "retry-preflight", func(ctx context.Context, in *OperationRetryInput) (*OK, error) {
+		revision := in.Body.Revision
+		if in.Body.OperationRevision > 0 {
+			revision = in.Body.OperationRevision
+		}
+		if revision < 1 || in.Body.Revision > 0 && in.Body.OperationRevision > 0 {
+			return nil, problem(ctx, 422, "One expected operation revision is required.")
+		}
 		return mutate(a, ctx, in.Org, false, func(tx pgx.Tx, actor store.Actor) error { return authorize(ctx, tx, actor, in.ID, false) }, func(tx pgx.Tx, actor store.Actor) (*OK, error) {
-			tag, e := tx.Exec(ctx, `UPDATE cosmoformer.operations SET status='queued',terminal_reason=NULL,revision=revision+1 WHERE id=$1 AND revision=$2 AND status='failed' AND kind='plan' AND EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=$1 AND outcome='preparation_failed') AND NOT EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=$1 AND (ever_permitted OR closed_at IS NULL OR outcome NOT IN ('success','preparation_failed')))`, in.ID, in.Body.Revision)
+			var kind, stack string
+			var spec runs.ExecutionSpec
+			if e := tx.QueryRow(ctx, `SELECT o.kind,o.stack_id::text,w.assignment_spec FROM cosmoformer.operations o JOIN cosmoformer.work_items w ON w.operation_id=o.id WHERE o.id=$1 ORDER BY CASE w.phase WHEN 'execution' THEN 0 ELSE 1 END LIMIT 1`, in.ID).Scan(&kind, &stack, newJSON(&spec)); e != nil {
+				return nil, e
+			}
+			if kind == "apply" {
+				if e := coordinator.ApplyEligibility(ctx, tx, stack, spec); e != nil {
+					return nil, applyProblem(ctx, e)
+				}
+				if e := coordinator.HoldApply(ctx, tx, spec, "operation", in.ID); e != nil {
+					return nil, applyProblem(ctx, e)
+				}
+			}
+			tag, e := tx.Exec(ctx, `UPDATE cosmoformer.operations SET status='queued',terminal_reason=NULL,revision=revision+1 WHERE id=$1 AND revision=$2 AND status='failed' AND EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=$1 AND outcome='preparation_failed') AND NOT EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=$1 AND (ever_permitted OR closed_at IS NULL OR outcome NOT IN ('success','preparation_failed')))`, in.ID, revision)
 			if e != nil {
 				return nil, e
 			}
 			if tag.RowsAffected() != 1 {
-				return nil, store.ErrConflict
+				return nil, applyProblem(ctx, runs.Fail("NEW_PLAN_REQUIRED"))
 			}
 			if _, e = tx.Exec(ctx, `UPDATE cosmoformer.work_items SET status='queued',resolved_preflight=NULL,revision=revision+1 WHERE id=(SELECT work_item_id FROM cosmoformer.attempts WHERE operation_id=$1 AND outcome='preparation_failed' ORDER BY created_at DESC,id DESC LIMIT 1)`, in.ID); e != nil {
 				return nil, e

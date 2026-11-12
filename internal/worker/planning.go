@@ -79,14 +79,51 @@ func (a *Agent) planNative(ctx, attemptCtx context.Context, assignment runs.Assi
 		return finish("preparation_failed")
 	}
 	lockPath := path.Join(s.Source.Root, ".terraform.lock.hcl")
-	pre := runs.PreInitSpec{ReviewedInputs: reviewed, Kind: "plan", SpecDigest: assignment.Digest, LockOrigin: "absent"}
+	pre := runs.PreInitSpec{ReviewedInputs: reviewed, Kind: assignment.Kind, SpecDigest: assignment.Digest, LockOrigin: "absent"}
+	var retained runs.Manifest
+	savedHash := ""
 	for _, f := range reviewed.Files {
 		if f.Repository == s.Source.RepositoryID && f.Commit == s.Source.Commit && f.Path == lockPath {
 			pre.LockOrigin = "tracked"
 			pre.LockHash = f.Hash
 		}
 	}
-	if pre.Validate(s, "plan", assignment.StackID, assignment.StateEpoch) != nil {
+	if assignment.Kind == "apply" {
+		raw, err := a.RestoreEvidence(attemptCtx, assignment, "manifest")
+		if err != nil || runs.Decode(raw, &retained) != nil || runs.Digest(retained) != s.RetainedPlan.ManifestDigest || retained.ValidateLock() != nil || runs.Digest(reviewed) != runs.Digest(retained.ReviewedInputs) {
+			return finish("preparation_failed")
+		}
+		binary, err := a.RestoreEvidence(attemptCtx, assignment, "binary_plan")
+		if err != nil || len(binary) == 0 {
+			return finish("preparation_failed")
+		}
+		if err = writeRestored(filepath.Join(dir, "plan.bin"), binary); err != nil {
+			return finish("preparation_failed")
+		}
+		savedHash = hash(binary)
+		pre.LockOrigin = "absent"
+		pre.LockHash = ""
+		pre.RetainedDigest = s.RetainedPlan.ManifestDigest
+		if retained.Lock.Present {
+			lock, err := a.RestoreEvidence(attemptCtx, assignment, "provider_lock")
+			if err != nil || runs.VerifyProviderLock(&retained, lock) != nil {
+				return finish("preparation_failed")
+			}
+			target := filepath.Join(tree, lockPath)
+			if original, err := protectedBytes(target, 67108864); err == nil {
+				if hash(original) != hash(lock) {
+					return finish("preparation_failed")
+				}
+			} else if !os.IsNotExist(fileError(target)) || writeRestored(target, lock) != nil {
+				return finish("preparation_failed")
+			}
+			pre.LockOrigin = "retained"
+			pre.LockHash = retained.Lock.Hash
+		} else if !os.IsNotExist(fileError(filepath.Join(tree, lockPath))) {
+			return finish("preparation_failed")
+		}
+	}
+	if pre.Validate(s, assignment.Kind, assignment.StackID, assignment.StateEpoch) != nil {
 		return finish("preparation_failed")
 	}
 	retain := func(kind string, v any) (string, error) {
@@ -131,16 +168,23 @@ func (a *Agent) planNative(ctx, attemptCtx context.Context, assignment runs.Assi
 	}
 	var manifest runs.Manifest
 	var schema, raw []byte
-	savedHash := ""
-	for i, command := range []string{"init", "schema", "plan", "show"} {
+	commands := []string{"init", "schema", "plan", "show"}
+	if assignment.Kind == "apply" {
+		commands = []string{"init", "apply"}
+	}
+	for i, command := range commands {
 		allowedGenerated := lockPath
-		if i == 0 {
+		if i == 0 && assignment.Kind != "apply" {
 			allowedGenerated = ""
 		}
 		if e = verifyTrees(reviewed, trees, allowedGenerated, s.Source.RepositoryID); e != nil {
 			return finish("failure")
 		}
-		if i > 1 && verifyNativeLock(filepath.Join(tree, lockPath), manifest) != nil {
+		checkLock := manifest
+		if assignment.Kind == "apply" {
+			checkLock = retained
+		}
+		if (i > 1 || assignment.Kind == "apply") && verifyNativeLock(filepath.Join(tree, lockPath), checkLock) != nil {
 			return finish("failure")
 		}
 		// The access handle is never reconstructed or renewed. Every child receives
@@ -153,18 +197,18 @@ func (a *Agent) planNative(ctx, attemptCtx context.Context, assignment runs.Assi
 			return finish("failure")
 		}
 		request := runs.CommandRequest{Ordinal: int64(i + 1), Command: command, PreInitDigest: result.PreInitDigest, ManifestDigest: result.ManifestDigest}
-		descriptor, e := runs.Command(s, "plan", request)
+		descriptor, e := runs.Command(s, assignment.Kind, request)
 		if e != nil {
 			return finish("failure")
 		}
 		request.Digest = runs.Digest(descriptor)
-		if command == "show" {
+		if command == "show" || command == "apply" {
 			saved, e := protectedBytes(filepath.Join(dir, "plan.bin"), plan.MaxBytes)
 			if e != nil || hash(saved) != savedHash {
 				return finish("failure")
 			}
 		}
-		program, root, args, e := nativeArgs(s, dir, tree, command, pre.LockOrigin == "tracked")
+		program, root, args, e := nativeArgs(s, dir, tree, command, pre.LockOrigin != "absent")
 		if e != nil {
 			return finish("failure")
 		}
@@ -283,7 +327,7 @@ func (a *Agent) planNative(ctx, attemptCtx context.Context, assignment runs.Assi
 				if e != nil {
 					return finish("failure")
 				}
-				if pre.LockOrigin == "tracked" && manifest.Lock.Hash != pre.LockHash {
+				if pre.LockOrigin != "absent" && manifest.Lock.Hash != pre.LockHash {
 					return finish("failure")
 				}
 				if e = manifest.ValidateLock(); e != nil {
@@ -297,6 +341,9 @@ func (a *Agent) planNative(ctx, attemptCtx context.Context, assignment runs.Assi
 				return finish("failure")
 			}
 			if e = verifyInstalledModules(dir, filepath.Join(tree, s.Source.Root), trees, inspected); e != nil {
+				return finish("failure")
+			}
+			if assignment.Kind == "apply" && runs.Digest(manifest) != s.RetainedPlan.ManifestDigest {
 				return finish("failure")
 			}
 			manifestID, e := retain("manifest", manifest)
@@ -356,6 +403,9 @@ func (a *Agent) planNative(ctx, attemptCtx context.Context, assignment runs.Assi
 	if e = verifyNativeLock(filepath.Join(tree, lockPath), manifest); e != nil {
 		return finish("failure")
 	}
+	if assignment.Kind == "apply" {
+		return finish("success")
+	}
 	options, ids, e := plan.Allocate(raw, plan.Options{Engine: s.Engine.Name, Version: s.Engine.Version, ProfileID: s.ProfileID, Providers: manifest.Providers, Secrets: reg}, nil, runs.ID)
 	if e != nil {
 		return finish("failure")
@@ -394,4 +444,20 @@ func verifyNativeLock(p string, m runs.Manifest) error {
 		return e
 	}
 	return runs.VerifyProviderLock(&m, raw)
+}
+
+func writeRestored(p string, raw []byte) error {
+	f, e := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if e != nil {
+		return e
+	}
+	_, e = f.Write(raw)
+	if e == nil {
+		e = f.Sync()
+	}
+	closeErr := f.Close()
+	if e != nil {
+		return e
+	}
+	return closeErr
 }

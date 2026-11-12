@@ -15,7 +15,7 @@ import (
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
-const SchemaVersion int32 = 12
+const SchemaVersion int32 = 13
 
 var ErrForbidden = errors.New("insufficient permission")
 var ErrNotFound = errors.New("not found")
@@ -90,6 +90,14 @@ func (s *Store) Ready(ctx context.Context) error {
  AND NOT has_table_privilege(current_user,'cosmoformer.recovery_evidence_versions','UPDATE,DELETE')`).Scan(&safe); e != nil || !safe {
 		return errors.New("database recovery has incompatible protections")
 	}
+	if e = s.Pool.QueryRow(ctx, `SELECT
+ (SELECT count(*)=3 FROM pg_trigger WHERE tgname IN ('release_operation_holds','apply_spawn_epoch','apply_operation_identity') AND tgrelid IN ('cosmoformer.operations'::regclass,'cosmoformer.start_permissions'::regclass) AND tgenabled='O')
+ AND (SELECT count(*)=6 FROM pg_trigger WHERE tgname='retire_queued_applies' AND tgrelid IN ('cosmoformer.plan_votes'::regclass,'cosmoformer.plans'::regclass,'cosmoformer.accounts'::regclass,'cosmoformer.memberships'::regclass,'cosmoformer.team_members'::regclass,'cosmoformer.grants'::regclass) AND tgenabled='O')
+ AND (SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid='cosmoformer.apply_start_events'::regclass)
+ AND NOT has_table_privilege(current_user,'cosmoformer.apply_start_events','INSERT,UPDATE,DELETE')`).Scan(&safe); e != nil || !safe {
+		return errors.New("database saved-plan Apply has incompatible protections")
+	}
+
 	return nil
 }
 func MigrationNames() ([]string, error) { return fs.Glob(migrationFiles, "migrations/*.sql") }

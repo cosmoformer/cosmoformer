@@ -118,7 +118,7 @@ func nativeArgs(s runs.ExecutionSpec, dir, tree, command string, lock bool) (str
 		program = "/usr/local/bin/terraform"
 	}
 	args := append([]string{}, runs.FixedFlags(command)...)
-	if len(args) == 0 || command == "apply" {
+	if len(args) == 0 || command == "apply" && s.RetainedPlan == nil {
 		return "", "", nil, ErrAgent
 	}
 	switch command {
@@ -140,7 +140,7 @@ func nativeArgs(s runs.ExecutionSpec, dir, tree, command string, lock bool) (str
 			}
 			args = append(args, "-var-file="+filepath.Join(tree, filepath.FromSlash(p)))
 		}
-	case "show":
+	case "show", "apply":
 		args = append(args, filepath.Join(dir, "plan.bin"))
 	}
 	return program, root, args, nil
