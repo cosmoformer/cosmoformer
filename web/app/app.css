@@ -148,3 +148,5 @@ code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.9em}
     .pr-head td { border: 0; padding: .5rem 0; overflow-wrap: anywhere; }
     .pr-head td::before { content: attr(data-label); display: block; font-weight: 600; margin-bottom: .25rem; }
 }
+
+.catalog-search{display:flex;flex-wrap:wrap;gap:1rem;align-items:end}.catalog-search label{flex:1;min-width:12rem}.catalog-code{overflow-wrap:anywhere}.catalog-snippet{font-family:var(--font-mono,monospace);width:100%;min-height:7rem;overflow-wrap:anywhere;resize:vertical}

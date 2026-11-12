@@ -109,7 +109,9 @@ test('keyboard users can reach and scroll overflow values and retained console o
     await page.keyboard.press('Tab');
     await expect(output).toBeFocused();
     await expect(output).toHaveCSS('outline-style', 'solid');
-    await page.keyboard.press('Home');
+    expect(await output.evaluate(e => e.scrollHeight > e.clientHeight)).toBe(true);
+    // Settle the starting position before exercising native keyboard scrolling.
+    await output.evaluate(e => e.scrollTo({ top: 0, behavior: 'instant' }));
     await expect.poll(() => output.evaluate(e => e.scrollTop)).toBe(0);
     await page.keyboard.press('PageDown');
     await expect.poll(() => output.evaluate(e => e.scrollTop)).toBeGreaterThan(0);
@@ -220,7 +222,8 @@ test('transient log retry retains history and offline polling resumes without re
     await expect.poll(() => requests).toBeGreaterThan(paused);
     await expect(page.getByText('retained', { exact: true })).toBeVisible();
     await page.getByRole('navigation', { name: 'Run context' }).getByRole('link', { name: 'Orbital platform' }).click();
-    await expect(page).toHaveURL(new RegExp(`env=${env}`));
+    await expect(page).toHaveURL(`${base}?env=${env}`);
+    await expect(page.getByRole('heading', { name: 'Orbital platform', exact: true })).toBeVisible();
     await page.reload();
     await expect(page.getByLabel('Environment filter')).toHaveValue(env);
     await expect(page.getByRole('link', { name: 'Project workspace' })).toHaveAttribute('href', `${base}?env=${env}`);
