@@ -15,7 +15,7 @@ import (
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
-const SchemaVersion int32 = 14
+const SchemaVersion int32 = 15
 
 var ErrForbidden = errors.New("insufficient permission")
 var ErrNotFound = errors.New("not found")
@@ -47,7 +47,7 @@ func (s *Store) Ready(ctx context.Context) error {
 	if e := s.Pool.QueryRow(ctx, `SELECT version FROM cosmoformer.schema_version`).Scan(&version); e != nil || version != SchemaVersion {
 		return errors.New("unsupported database schema; run explicit migrations")
 	}
-	e := s.Pool.QueryRow(ctx, `SELECT current_user='cosmoformer_app' AND NOT r.rolsuper AND NOT r.rolbypassrls AND NOT r.rolcreaterole AND NOT r.rolcreatedb AND NOT pg_has_role(current_user,'cosmoformer_owner','MEMBER') AND NOT has_schema_privilege(current_user,'cosmoformer','CREATE') AND NOT EXISTS(SELECT FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='cosmoformer' AND c.relowner=r.oid) AND NOT has_table_privilege(current_user,'cosmoformer.accounts','SELECT') AND has_function_privilege(current_user,'cosmoformer.session_identity(bytea)','EXECUTE') FROM pg_roles r WHERE rolname=current_user`).Scan(&safe)
+	e := s.Pool.QueryRow(ctx, `SELECT session_user=current_user AND current_user='cosmoformer_app' AND NOT r.rolsuper AND NOT r.rolbypassrls AND NOT r.rolcreaterole AND NOT r.rolcreatedb AND NOT pg_has_role(current_user,'cosmoformer_owner','MEMBER') AND NOT has_schema_privilege(current_user,'cosmoformer','CREATE') AND NOT EXISTS(SELECT FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='cosmoformer' AND c.relowner=r.oid) AND NOT has_table_privilege(current_user,'cosmoformer.accounts','SELECT') AND has_function_privilege(current_user,'cosmoformer.session_identity(bytea)','EXECUTE') FROM pg_roles r WHERE rolname=current_user`).Scan(&safe)
 	if e != nil || !safe {
 		return errors.New("database runtime role has incompatible privileges")
 	}
@@ -104,6 +104,16 @@ func (s *Store) Ready(ctx context.Context) error {
  AND EXISTS(SELECT FROM pg_trigger WHERE tgname='feedback_comment_identity' AND tgrelid='cosmoformer.feedback_comments'::regclass AND tgenabled='O')`).Scan(&safe); e != nil || !safe {
 		return errors.New("database PR workflow has incompatible protections")
 	}
+	if e = s.Pool.QueryRow(ctx, `SELECT
+ NOT has_table_privilege(current_user,'cosmoformer.operator_events','SELECT,INSERT,UPDATE,DELETE')
+ AND NOT has_table_privilege(current_user,'cosmoformer.key_rotations','SELECT,INSERT,UPDATE,DELETE')
+ AND NOT has_table_privilege(current_user,'cosmoformer.backup_artifacts','SELECT,INSERT,UPDATE,DELETE')
+ AND (SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid='cosmoformer.backup_artifacts'::regclass)
+ AND NOT EXISTS(SELECT FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='cosmoformer' AND c.relkind='r' AND c.relname NOT IN ('coordination_gate','schema_version') AND NOT EXISTS(SELECT FROM pg_trigger t WHERE t.tgrelid=c.oid AND t.tgname='operator_write_guard' AND t.tgenabled='O'))
+ AND (SELECT count(*)=3 FROM pg_trigger WHERE tgname='current_ciphertext_guard' AND tgrelid IN ('cosmoformer.secrets'::regclass,'cosmoformer.source_credentials'::regclass,'cosmoformer.integrations'::regclass) AND tgenabled='O')`).Scan(&safe); e != nil || !safe {
+		return errors.New("database operator maintenance has incompatible protections")
+	}
+
 	return nil
 }
 func MigrationNames() ([]string, error) { return fs.Glob(migrationFiles, "migrations/*.sql") }
@@ -117,6 +127,9 @@ func Migrate(ctx context.Context, dsn string) error {
 	e = c.QueryRow(ctx, `SELECT current_user='cosmoformer_owner' AND NOT r.rolsuper AND NOT r.rolbypassrls AND NOT r.rolcreaterole AND NOT r.rolcreatedb AND EXISTS(SELECT FROM pg_roles a WHERE a.rolname='cosmoformer_app' AND NOT a.rolsuper AND NOT a.rolbypassrls AND NOT a.rolcreaterole AND NOT a.rolcreatedb AND NOT pg_has_role(a.oid,r.oid,'MEMBER')) FROM pg_roles r WHERE rolname=current_user`).Scan(&safe)
 	if e != nil || !safe {
 		return errors.New("operator-provisioned owner/app roles are missing or unsafe")
+	}
+	if _, e = c.Exec(ctx, `SELECT pg_advisory_lock(707133,13)`); e != nil {
+		return e
 	}
 	if _, e = c.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS cosmoformer AUTHORIZATION cosmoformer_owner`); e != nil {
 		return fmt.Errorf("create application schema: %w", e)

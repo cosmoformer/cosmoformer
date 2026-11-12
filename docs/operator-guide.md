@@ -12,7 +12,7 @@ make check
 make test-db-stop
 ```
 
-`test-unit` includes Go race checks and static checks. The serial host integration/coverage runs allow 30 minutes for the expanded acceptance suite; CI still selects the complete, disjoint inventory across four bounded shards. `test-integration` runs against generated, marker-verified PostgreSQL databases using the real restricted runtime role. It covers tenant isolation, version-4/5/8 forward migrations through version 14, permanent ownership races, source fencing, encryption quotas, OAuth session binding, single-flight refresh, signed webhook deduplication and the local worker API journey. Source journeys replace external Git I/O; planning journeys additionally inject native/AWS I/O; the separate Linux suite exercises actual Git and process handling.
+`test-unit` includes Go race checks and static checks. The serial host integration/coverage runs allow 30 minutes for the expanded acceptance suite; CI still selects the complete, disjoint inventory across four bounded shards. `test-integration` runs against generated, marker-verified PostgreSQL databases using the real restricted runtime role. It covers tenant isolation, version-4/5/8 forward migrations through version 15, permanent ownership races, source fencing, encryption quotas, OAuth session binding, single-flight refresh, signed webhook deduplication and the local worker API journey. Source journeys replace external Git I/O; planning journeys additionally inject native/AWS I/O; the separate Linux suite exercises actual Git and process handling.
 
 `test-source` builds the pinned Linux image, verifies its native executable and Git package identity and runs loopback-only Git HTTPS tests with `--network none`. It mounts no database DSN, cloud credential, home directory or Docker socket. Downloads occur during the explicit build, with pinned base images, signed Debian snapshot metadata and exact archive checksums. Native runtime identity checks use the baked executable; supervisor checks use synthetic subprocess fixtures. Passing this suite does not approve an S3/DynamoDB backend profile or an AWS provider version for execution.
 
@@ -32,7 +32,7 @@ Holds reference an existing same-tenant plan, accepted operation, attempt, or re
 
 Migration 008 advances the runtime to schema version 8. It preserves migrations 001–007 and adds immutable execution assignment snapshots, preparation/credential deadlines, provider-lock attestation links, producing-command artifact ordinals and exact spawn/stop facts. Readiness checks require the new integrity triggers. Narrow tenant-checked helpers validate only an attempt's own binding, observe the authority clock and place contradictory execution facts under attention; the runtime still cannot list or mutate global backend targets directly. Migration and serving remain separate commands.
 
-Migration 009 preserves migrations 001–008 and alters all existing SECURITY DEFINER helpers in place to use `pg_catalog, cosmoformer, pg_temp`. Explicitly putting temporary relations last prevents runtime-owned temporary tables from replacing trusted application tables in helper lookups. Function identities, bodies and grants remain unchanged. Serving requires schema version 14 and rejects any definer helper with a different owner or search path. Run the explicit owner migration before restarting the runtime; serving does not repair database configuration. Regression checks cover durable encryption accounting with colliding temporary tables, cold/cached calls, unsafe configuration rejection, and version-8 upgrade of an already-open connection. This validation uses dummy data and ordinary tables, with no privilege-escalation payload or live database probe.
+Migration 009 preserves migrations 001–008 and alters all existing SECURITY DEFINER helpers in place to use `pg_catalog, cosmoformer, pg_temp`. Explicitly putting temporary relations last prevents runtime-owned temporary tables from replacing trusted application tables in helper lookups. Function identities, bodies and grants remain unchanged. Serving requires schema version 15 and rejects any definer helper with a different owner or search path. Run the explicit owner migration before restarting the runtime; serving does not repair database configuration. Regression checks cover durable encryption accounting with colliding temporary tables, cold/cached calls, unsafe configuration rejection, and version-8 upgrade of an already-open connection. This validation uses dummy data and ordinary tables, with no privilege-escalation payload or live database probe.
 
 Migration 006 refuses a database containing version-5 artifacts or backup sets with `EVIDENCE_METADATA_RECONCILIATION_REQUIRED`. Version 5 lacks bucket and installation capture metadata; neither can be safely inferred. The migration visits each tenant under FORCE RLS and fails transactionally without advancing the version. Preserve the database and reconcile verified metadata through a separately reviewed migration before retrying; do not delete evidence to bypass this guard. Databases containing account/source/preflight/binding records without these legacy evidence rows upgrade directly. No backup capture or evidence deletion occurs during migration.
 
@@ -407,3 +407,209 @@ Editing catalog metadata does not rewrite a historical run or its reviewed manif
 Git `depends_on` declarations are projected into manual stack links when an authoritative tracked inventory is accepted. Values identify unambiguous, active stack declaration UUIDs in the same organization, including declarations imported together. Missing, ambiguous or self references reject the inventory transaction without partially changing the dependency graph. Cycles are accepted as manual metadata. Removing a declaration's dependencies removes its outgoing links on the next accepted import. No scheduler, approval or infrastructure operation is triggered or reordered by these edges.
 
 GET `/organizations/{org}/stacks/{id}/dependencies` identifies the accepted stack revision and returns only dependency links within the current reader's stack/project/environment access. Hidden target IDs, names and counts are omitted. The stack page preserves each visible target's project/environment context. Changes to these Git-owned declarations go through source review and inventory import; there is no separate dependency editor or execution cascade.
+
+## Operator maintenance and restoration (milestone 13)
+
+Schema **15** adds host operation evidence, an offline latch, rotation receipts and exact backup manifests. Migrations **001–014 remain unchanged**. These workflows use the existing coordination gate, encryption ledger, FORCE RLS, artifact holds, backend namespace claims and recovery cases. They do not operate a backup service, provision infrastructure, rotate upstream credentials or run retention schedules. Company compatibility remains **`not_assessed`**. Cleanup scheduling, deployment packaging and company adoption remain milestones 14, 15 and 16.
+
+### Authority, maintenance and independent stop evidence
+
+Use the host executable with `COSMOFORMER_MIGRATION_DSN_FILE` pointing to an owner-only credential file for the real `cosmoformer_owner` login. Host operations verify the session/login identity, role restrictions, schema ownership and exact schema version; an application account, including an installation administrator, is insufficient. The runtime must log in directly as `cosmoformer_app`; using a privileged login with a startup role override is rejected. The offline and ciphertext guards also require both owner login and current owner role for their host-write exception. No browser operator endpoint is provided. All operator commands serialize through one session advisory lock; state mutations also take the existing coordination gate. Tenant work explicitly visits each organization using transaction-local scope. The owner never gains a general tenant bypass.
+
+```sh
+cosmoformer maintenance enter
+cosmoformer maintenance status
+```
+
+Entry immediately blocks new assignments, approvals, Apply and positive worker execution authority. It preserves unresolved attempts, worker/backend reservations and recovery holds. Authenticated evidence, stop reports and recovery evidence remain accepted in this maintenance phase. Drain the workers and independently inspect every host/process group, queued supervisor action and external writer. An idle database row, old heartbeat, expired permission, signal acknowledgement or elapsed deadline does not establish stopped processes. For an unresolved attempt, require independently verified **stopped** process evidence; an `idle` assertion alone is rejected.
+
+Stop the platform, background integration/artifact writers and any cleanup process before offline commands. Verify that all application database sessions have closed. The session check corroborates the external evidence; it does not replace it. Offline commands durably latch `offline=true` before substantive work. The database rejects late application writes, including writes from definer functions and processes holding cached encryption quotas. Offline maintenance intentionally requires normal processes to remain stopped; evidence reports should be delivered during draining, before offline entry. A failed operation does not clear either latch.
+
+Create a private directory (`mkdir -m 700 /operator/custody`) and an owner-only evidence JSON file. Paths here are examples to be replaced by the operator; no command in this guide has been run against an application database. Supply the current maintenance UUID from status, every registered worker's current ID/generation/agent identity and independently collected references:
+
+```json
+{
+  "maintenance_id": "<current UUID from maintenance status>",
+  "reference": "protected-maintenance-record-123",
+  "writers_stopped": true,
+  "cleanup_stopped": true,
+  "workers": [
+    {
+      "id": "<worker UUID>",
+      "generation": 4,
+      "agent": "<current agent UUID, or empty when none>",
+      "state": "stopped",
+      "reference": "protected-host-process-check-456"
+    }
+  ]
+}
+```
+
+The placeholders above are explanatory, not valid executable evidence. Use an empty workers array only when there are no workers. Evidence files use protected regular owner-only files with a separate 16 MiB bound for complete recovery inventories; credential text files retain their 16 KiB limit. In evidence files, unknown fields, trailing documents, duplicate worker identities, missing workers and stale generations fail. Evidence references must describe actual inspections; the CLI records operator assertions and cannot inspect remote hosts itself. Keep protected underlying evidence separately. After `restore-begin`, obtain the newly fenced worker identities from tenant-scoped owner reads; the external record must also account for the original agents and all post-backup workers.
+
+Normal operation resumes only with:
+
+```sh
+COSMOFORMER_ENCRYPTION_KEY_FILE=/operator/custody/current.key \
+  cosmoformer maintenance exit --evidence-file /operator/custody/stops.json
+```
+
+Exit rechecks the evidence window, stopped writers/workers, committed key fingerprint, clock latch and restore prerequisites. It never clears execution ownership or recovery cases. Supply the actual protected key file intended for runtime. Exit while the platform is still stopped, then start exactly one platform with the matching key and re-enroll verified workers. Unresolved targets remain blocked by the existing recovery path even after installation maintenance ends.
+
+### Offline encryption rotation and interruption
+
+Keys are exactly 32 raw bytes in protected files. Obtain a new independent key through the operator's controlled generation/custody procedure. A filename or label change is not a new key. Do not share a write key across installations with separate ledgers. Do not put key bytes, credentials or plaintext in arguments, receipts, audit records or terminal output.
+
+```sh
+cosmoformer rotate-key \
+  --old-key-file /operator/custody/current.key \
+  --new-key-file /operator/custody/next.key \
+  --evidence-file /operator/custody/stops.json \
+  --receipt-file /operator/custody/rotation-unique.jsonl
+cosmoformer maintenance status
+```
+
+The receipt must be a new file in a private directory. The command syncs a protected intent receipt, including a rotation UUID and old/new fingerprints, before any database mutation. It reserves the complete bounded batch in committed blocks of 4,096 under the actual new key fingerprint, then opens a separate atomic ciphertext transaction. The current pilot bound is 65,536 managed records. Rotation covers all non-null secret, source-credential and integration ciphertext in all tenants, including disabled credentials. AAD retains the organization, immutable record ID, purpose and semantic revision. Neither semantic nor ordinary record revisions change. Every encryption consumes precommitted allowance; authentication failure, rollback, interruption and unused slots never refund quota. The existing 2^32 lifetime ceiling remains enforced. Status recommends rotation at least one reservation block before 90% usage, so the next 4,096-slot allocation cannot silently cross that warning boundary. Formerly active/retired keys cannot become new write keys.
+
+Only the all-or-nothing ciphertext transaction retires the old key, activates the new key and records the committed rotation. Database commit and runtime key-file installation are separate operations. Retain both key files, the intent/outcome receipt and relevant backups throughout the handoff. Keep the platform stopped until the database result is established:
+
+- Before reservation commit, no encryption is allowed.
+- After reservation commit and before ciphertext commit, allowance is burned even if ciphertext rolls back.
+- If a command is interrupted or commit is uncertain, **do not replay blindly**. Run `maintenance status` using a new operator process. Its advisory lock waits for the earlier operator session to settle before it reads active metadata and rotation history.
+- Match the receipt UUID and old/new fingerprints with the committed rotation entry and `active_key_fingerprint`. An entry with `committed_at=null` records reserved usage, not successful rotation. If active metadata remains old after serialized inspection, retain the old runtime key and choose a new receipt for retry; reservation remains spent.
+- If the rotation committed, install the retained new key as the runtime file. An old key cannot pass maintenance exit or startup fingerprint validation. Never rewrite ciphertext to accommodate a mismatched file. A failed receipt outcome append does not undo a committed database rotation; the synced intent and database history resolve it.
+
+Keep historical decrypt keys outside the normal runtime for every retained database backup. Current-row rotation does not authorize destroying old backup keys. Missing keys cannot be repaired with administrator password recovery. No online keyring, automatic key generation, hot reload, KMS dependency or background rotation is introduced.
+
+### Exact backup protection and custody
+
+After independent stop verification and before starting an external backup:
+
+```sh
+cosmoformer backup-hold create --backup-id <new-backup-UUID> \
+  --evidence-file /operator/custody/stops.json \
+  --receipt-file /operator/custody/backup-unique.jsonl
+```
+
+Under one coordination-gated transaction, this captures the DB UTC cutoff and every finalized nondeleted available exact artifact already present in the frozen database snapshot, across explicitly enumerated tenants. A historical clock correction can leave a finalized timestamp later than the displayed cutoff; that artifact is still captured and protected. Timestamps never exclude an object that the database backup will retain. Incomplete uploads, deletion work and unresolved cleanup claims reject capture. The database stores exact artifact ID/tenant/bucket/key/version/SHA-256/byte-count tuples, their deterministic ordered JSON SHA-256 digest and count, and that backup's holds atomically. A failure leaves no partial set and retains maintenance. Backup IDs cannot be recaptured or silently extended. Holds from other backups, plans, attempts and recovery remain independent.
+
+Keep writers and cleanup stopped, with offline maintenance active, for the entire external backup and its validation. The external recovery point must include the **committed capture transaction**, not merely have a timestamp equal to its precommit cutoff. Back up the database, exact artifact versions, protected manifest and matching historical decrypt keys as coordinated custody. Keep the company-controlled emergency inventory and operator roster outside the database, including resources adopted or workers enrolled after the backup. Separate storage retention/object policies must preserve protected versions; database holds cannot prevent an external storage administrator from deleting them.
+
+To recover a lost filesystem manifest without recapturing:
+
+```sh
+cosmoformer backup-hold inspect --backup-id <backup-UUID> \
+  --receipt-file /operator/custody/recovered-backup-unique.jsonl
+```
+
+Inspect verifies the stored digest and count under owner serialization and produces a new protected receipt. Status lists backup summaries and release state. Release is a separate explicit operation:
+
+```sh
+cosmoformer backup-hold release --backup-id <backup-UUID> \
+  --evidence-file /operator/custody/retention-checks.json
+```
+
+The evidence must include `"retention_checked": true` and current stop evidence. Independently verify that the selected database backup/WAL recovery points and copies no longer require those artifacts or keys, including legal/operator retention requirements. Release changes only that selected backup's active holds; it neither deletes artifacts nor releases another owner's protection. Inspect remains available afterward. No retention schedule runs in this milestone.
+
+### Replaceable PostgreSQL base-backup/WAL reference
+
+An operator-managed PostgreSQL physical base backup plus continuously retained WAL is a reference approach, not a bundled implementation or required vendor service. Use backup/replication authority separately controlled from the application and migration owner; FORCE RLS is not a backup export bypass. A tenant-scoped logical export is not a complete installation backup. Coordinate a compatible `pg_basebackup`-style cluster backup, required WAL and tablespaces with the capture receipt; retain WAL from the base backup through each supported recovery point and verify archive continuity and recoverability. Account for backup manifests, database roles/configuration, PostgreSQL/binary major-version compatibility and independent artifact/key escrow.
+
+Restore physical data and replay WAL only into an isolated stopped installation using the compatible PostgreSQL tooling. Verify the selected point includes the backup-hold capture, that its digest/count match the retained receipt, and that exact artifact versions and historical decrypt keys are retrievable. Replace this mechanism with another operator-reviewed backup solution only if it satisfies the same consistent-database, exact-artifact, key-custody and external-inventory requirements. Test the whole procedure. No backup runner, WAL archiver, managed database dependency, live backup operation or RPO/RTO guarantee is supplied here. The local executable exercise below uses logical dump/restore to test application reconciliation, not physical PITR/WAL recovery performance.
+
+### Maintenance-only restore reconciliation
+
+A restored database must never be attached directly to a running platform. Keep every platform, worker, integration writer and external state writer stopped and isolate its network access first. Use the backup's compatible binary/schema; if a forward upgrade is required, follow the upgrade procedure below before invoking schema-15 host commands. Begin a unique restore operation before serving:
+
+```sh
+cosmoformer restore-begin --restore-id <new-restore-UUID>
+cosmoformer maintenance status
+```
+
+Begin atomically latches maintenance/offline/clock-unreliable, establishes a new evidence window, revokes sessions, proofs, browser mutation receipts and OAuth pending states, removes account password verifiers, fences and pauses workers with unusable replacement verifiers, disables source credentials/integrations and their old webhook identity, retires unclaimed queued work and invalidates pending plans. Credential ciphertext remains available solely for maintenance decryption/rotation; original semantic revisions remain intact. Outstanding attempts, permits, reservations and holds are **not** declared stopped or released. Bootstrap cannot reopen: use host `recover-admin` to supply fresh one-use recovery codes to verified administrators after the restoration checks.
+
+Rebuild a complete external inventory using independent records, not just the backup. Account for Git/source configuration, backend state and auxiliary lock/checksum bindings, worker hosts/agent processes and every external writer created after the backup. The operator evidence additionally requires:
+
+```json
+{
+  "inventory_complete": true,
+  "external_writers_stopped": true,
+  "source_reconciled": true,
+  "inventory_reference": "protected-external-emergency-inventory",
+  "backends": [
+    {
+      "org_id": "<exact organization UUID>",
+      "stack_id": "<exact stack UUID>",
+      "partition": "aws",
+      "bucket": "example-state-bucket",
+      "key": "exact/state.tfstate",
+      "lock_profile": "s3",
+      "table_arn": null,
+      "reference": "protected-backend-binding-inspection"
+    }
+  ],
+  "artifacts": [
+    {
+      "org_id": "<organization UUID>",
+      "id": "<artifact UUID>",
+      "bucket": "example-artifacts",
+      "key": "exact-object-key",
+      "version": "exact-version-id",
+      "sha256": "<64 lowercase hex digits>",
+      "size": 123,
+      "available": true,
+      "reference": "protected-exact-version-digest-check"
+    }
+  ]
+}
+```
+
+Merge these fields into the current full stop-evidence file; the fragment alone is insufficient. Include all retained bindings and independently discovered post-backup bindings. List post-backup workers as extra independently stopped identities in `workers`, even though the database cannot enumerate them. Restore reconciliation requires `stopped` for every inventoried worker; an `idle` assertion cannot replace stop evidence across a restored history gap. Exact post-backup backends are adopted through the existing canonical binding/namespace collision mechanism onto the correct restored stack/revision. A missing stack/revision or conflicting binding rejects the whole reconciliation and keeps maintenance active; reconstruct the exact configuration from trusted recovery records under a separately reviewed owner procedure, or choose a suitable recovery point. The command does not invent missing configuration or treat unknown used targets as free. If inventory or stop evidence is incomplete, remain stopped in maintenance.
+
+```sh
+cosmoformer restore-reconcile --evidence-file /operator/custody/restore.json
+```
+
+Every adopted backend enters the existing recovery process, including those with no surviving attempt. Existing open cases get a new evidence revision, clearing old stop/reconciliation facts and making old votes stale. Available evidence is held for recovery. State epochs advance; old plans cannot be revived. Independent host inventory is not recovery clearance: submit current stop/state/infrastructure evidence through the existing scoped recovery process, collect the current required distinct approvals and Apply authority, then clear. An originless backend requires explicit manual stop authority; it cannot borrow agent authority. Recovery plans remain diagnostic. Deployment requires a fresh normal plan and fresh normal approvals after clearance.
+
+Artifact availability assertions must match the retained exact bucket/key/version/hash/size. Verify both bytes and digest independently. Omitted, unavailable or missing exact versions are marked `unavailable`; a `latest` object, same-name object or newer version never substitutes. Historical evidence and backup identities remain retained.
+
+A restored encryption ledger cannot prove the old key's lifetime use. `restore-begin` permanently retires every key represented in that restored ledger, including the old active key and unfinished rotation targets. They remain available only for decryption; no later maintenance window can reactivate their counters after the first fresh-key rotation clears the restore key requirement. Supply a **genuinely new, never-used write key**, not any key represented in the restored history, even an unfinished rotation key. Add `"fresh_key_never_used": true` and `"key_history_reference": "protected-independent-key-generation-record"` to the evidence and run `rotate-key` with the historical decrypt key and the new key. The external record must exclude reuse across lost post-backup history or other installations. A failed restored-key rotation needs another genuinely new candidate; restored counters are never renewed or trusted as historical lifetime accounting.
+
+Independently validate host/database UTC synchronization and add `"clock_validation": "protected-utc-validation-record"`, then:
+
+```sh
+cosmoformer clock-reset --verified --evidence-file /operator/custody/restore.json
+```
+
+Clock reset also works for a clock fault without a restore. It requires maintenance and independent worker/writer stop evidence, records validation, revokes sessions/proofs/OAuth pending states, invalidates pending plans and resets the database authority high-water/platform/tick state. It never releases an unresolved attempt or auto-resumes work. Retain the external evidence; this command does not synchronize the host clock itself.
+
+After reconciliation, new-key rotation and clock validation, explicitly exit maintenance with the matching runtime key. Recover verified administrators, restart one platform, re-enroll verified workers, replace/reconnect source credentials, review current runtime approvals and scoped grants, and complete backend recovery. Source checks and fresh normal plans must precede deployment. Old browser actions, proofs, worker tokens, OAuth callbacks and saved plans have no restored replay authority.
+
+### Forward upgrades and emergency handback
+
+Upgrades are explicit and forward-only. Enter maintenance using the current compatible binary, drain/report worker outcomes, independently verify stopped workers and normal writers, capture/test backup custody and stop the platform. Use the owner credential to run the new binary's `migrate --list` and `migrate`, then its maintenance/status checks. On a pre-15 schema, use the previous binary's existing authority gates/owner procedure to hold maintenance during the transition; never start the new runtime against an old schema. A historical `maintenance=true` row without a maintenance UUID is assigned an evidence window by `maintenance enter` after upgrade. Validate the matching key and new binary before explicit maintenance exit. There are no down migrations or partial-schema rollback paths; failed upgrades remain stopped for forward repair or coordinated backup restoration/reconciliation.
+
+Emergency handback is a human-controlled recovery action. Use the company-controlled external roster/evidence location; this project does not invent or host it. Independently establish every platform/worker/external process stopped, preserve exact target/lock/state identities and recovery artifacts, inspect infrastructure/state and account for ambiguous execution. Do not clear a backend lock, erase reservations, falsify native stop events or count signal delivery as proof. Record manual authority and reconciliation through the existing recovery workflow, collect its current votes and permissions, and require a new normal plan. A host maintenance exit is not backend clearance. If evidence remains uncertain, keep the installation in maintenance and retain ownership until it can be reconciled.
+
+### Executable synthetic recovery exercise
+
+```sh
+make tools  # if the pinned local tools are not already present
+.build/tools/node-v26.13.0-darwin-arm64/bin/node scripts/operator-recovery.mjs
+# Or use the pinned Node executable for your host architecture.
+```
+
+The script creates its own random, marked loopback PostgreSQL container and generated test databases, removes its owned container afterward, and never selects developer/application databases. It uses synthetic keys/credentials, independent tenant fixtures and a temporary exact-version artifact directory. It exercises quota burn on authentication failure and real transaction interruption, atomic rotation, backup capture/release, clock reset, actual PostgreSQL `pg_dump`/`pg_restore`, restored credential invalidation, post-backup worker/backend inventory, adoption into recovery, missing-version unavailability and explicit resumption. PostgreSQL Docker tooling is required; missing prerequisites fail. No live Bitbucket/AWS service, real backup, real restore target or company resource is used. Full `make test-integration` also runs this restore test using the selected marked test container.
+
+### Milestone 13 local verification — 2026-11-12
+
+Go race tests and vet passed, including integration-tag static checks. The full PostgreSQL integration suite passed across all eight selected packages; acceptance completed with 101 top-level passes and four expected opt-in skips. Those opt-in checks were exercised separately by the native/browser runs. Focused operator regressions additionally verified real transaction interruption, atomic two-tenant backup rollback, protected receipt recovery, key-file mismatch, stricter post-backup worker stop requirements and originless backend clearance under current distinct votes.
+
+Frontend type checks, the production build, all 245 frontend tests and all 48 Chromium/Firefox journeys passed. Linux source/supervision checks and both pinned OpenTofu/Terraform native matrices passed. The standalone synthetic recovery exercise passed using its own disposable dependencies and actual PostgreSQL dump/restore. These results do not establish physical base-backup/WAL recovery, live AWS/Bitbucket compatibility, company adoption, capacity or RPO/RTO. Operator-supplied external stop/inventory/key-history evidence remains part of the trust boundary; bounded rotation accepts at most 65,536 current managed records and operator evidence files at most 16 MiB.
+
+### Focused milestone 13 review
+
+The restore/replay, key-accounting and maintenance-gate review corrected four issues: unfinished keys from restored history could previously become write keys again after the first fresh rotation; runtime readiness accepted a privileged login masked by an application-role override; clock-skewed finalization timestamps could exclude existing versions from backup protection; and a 4,096-slot reservation could cross 90% before the status warning appeared. Restored keys now stay permanently retired, runtime login and role must both be the application identity, backup membership follows the frozen database snapshot, and the warning precedes the threshold by a full quota block. Migrations 001–014 remain unchanged.
+
+Review validation passed: Go race/unit checks and vet (including integration-tag vet), full store/coordinator/API PostgreSQL integration packages, focused approval/execution/recovery gate and replay acceptance checks, owner/CLI and forward-upgrade regressions, and the standalone actual PostgreSQL dump/restore exercise with historical unfinished keys. Frontend and native execution code were unchanged in this review; their earlier milestone verification remains the baseline. This was a focused review of these operator boundaries, not a comprehensive repository security audit. External stop, inventory and new-key-history assertions remain operator responsibilities; physical WAL/PITR recovery remains untested.
