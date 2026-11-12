@@ -604,3 +604,202 @@ func TestOperatorWarnsBeforeTheQuotaBlockCrossesNinetyPercent(t *testing.T) {
 		}
 	}
 }
+
+func TestOperatorRestoreRejectsAmbiguousInventoryWithoutPartialAdoption(t *testing.T) {
+	db := testsupport.NewDatabase(t)
+	ctx := operatorCtx
+	x := evidenceFixture(t, db)
+	registerSyntheticKey(t, db, testCipher(t, 121))
+	sqlOK(t, db.Owner, `INSERT INTO cosmoformer.worker_reservations(org_id,worker_id,attempt_id,generation,agent_instance) SELECT org_id,worker_id,id,generation,agent_instance FROM cosmoformer.attempts WHERE id=$1`, x["attempt"])
+	sqlOK(t, db.Owner, `INSERT INTO cosmoformer.backend_reservations(org_id,target_id,attempt_id,stack_id) SELECT org_id,target_id,id,stack_id FROM cosmoformer.attempts WHERE id=$1`, x["attempt"])
+	var otherOrg, newStack, newRevision, artifact string
+	mustOp(t, db.Owner.QueryRow(ctx, `INSERT INTO cosmoformer.organizations(name) VALUES('Other restoration tenant') RETURNING id::text`).Scan(&otherOrg))
+	mustOp(t, db.Owner.QueryRow(ctx, `INSERT INTO cosmoformer.stacks(org_id,project_id,environment_id,repository_id,declaration_id,display_name) VALUES($1,$2,$3,$4,gen_random_uuid(),'Post-backup adoption') RETURNING id::text`, x["org"], x["project"], x["env"], x["repo"]).Scan(&newStack))
+	mustOp(t, db.Owner.QueryRow(ctx, `INSERT INTO cosmoformer.stack_revisions(org_id,stack_id,commit,parsed_config,effective_config,semantic_digest,inventory_revision) VALUES($1,$2,'synthetic','{}','{}',sha256('synthetic'::bytea),1) RETURNING id::text`, x["org"], newStack).Scan(&newRevision))
+	sqlOK(t, db.Owner, `UPDATE cosmoformer.stacks SET effective_revision_id=$1 WHERE id=$2`, newRevision, newStack)
+	hash := sha256.Sum256([]byte("x"))
+	mustOp(t, db.Owner.QueryRow(ctx, `INSERT INTO cosmoformer.artifacts(org_id,attempt_id,kind,upload_id,bucket,object_key,state,version_id,sha256,byte_count,finalized_at) VALUES($1,$2,'manifest',gen_random_uuid(),'synthetic','exact','finalized','v1',$3,1,clock_timestamp()) RETURNING id::text`, x["org"], x["attempt"], hash[:]).Scan(&artifact))
+	db.App.Pool.Close()
+	op := openOperator(t, db)
+	mustOp(t, op.RestoreBegin(ctx, runs.ID()))
+	ev := stopEvidence(t, op, db)
+	ev.InventoryComplete = true
+	ev.ExternalWritersStopped = true
+	ev.SourceReconciled = true
+	ev.InventoryReference = "independent-inventory"
+	binding := operator.Backend{Org: x["org"], Stack: x["stack"], Partition: "aws", Bucket: "fictional-evidence-bucket", Key: x["org"], LockProfile: "s3", Reference: "verified-existing-binding"}
+	adopted := operator.Backend{Org: x["org"], Stack: newStack, Partition: "aws", Bucket: "synthetic-adoption", Key: "state.tfstate", LockProfile: "s3", Reference: "verified-post-backup-binding"}
+	exact := operator.ArtifactCheck{Org: x["org"], ID: artifact, Bucket: "synthetic", Key: "exact", Version: "v1", SHA256: hex.EncodeToString(hash[:]), Size: 1, Available: true, Reference: "independently-verified-exact-version"}
+	ev.Backends = []operator.Backend{binding}
+	ev.Artifacts = []operator.ArtifactCheck{exact}
+	sqlOK(t, db.Owner, `SELECT set_config('app.org_id',$1,false)`, x["org"])
+	var epoch, revision int64
+	mustOp(t, db.Owner.QueryRow(ctx, `SELECT (SELECT state_epoch FROM cosmoformer.backend_targets WHERE id=$1),(SELECT evidence_revision FROM cosmoformer.recovery_cases WHERE id=$2)`, x["target"], x["recovery"]).Scan(&epoch, &revision))
+	cases := []struct {
+		name, message string
+		change        func(*operator.Evidence)
+	}{
+		{"tenant mismatch", "backend adoption failed", func(e *operator.Evidence) { b := binding; b.Org = otherOrg; e.Backends = []operator.Backend{b} }},
+		{"changed binding", "backend inventory conflicts", func(e *operator.Evidence) {
+			b := binding
+			b.Key = "different.tfstate"
+			e.Backends = []operator.Backend{b}
+		}},
+		{"duplicate binding", "invalid or duplicate backend inventory", func(e *operator.Evidence) { e.Backends = []operator.Backend{binding, binding} }},
+		{"partial adoption with missing binding", "backend inventory omits a retained binding", func(e *operator.Evidence) { e.Backends = []operator.Backend{adopted} }},
+		{"substituted object version", "artifact check must name the exact retained version", func(e *operator.Evidence) {
+			a := exact
+			a.Version = "latest"
+			e.Artifacts = []operator.ArtifactCheck{a}
+		}},
+		{"unknown object", "artifact check names an unknown artifact", func(e *operator.Evidence) { a := exact; a.ID = runs.ID(); e.Artifacts = []operator.ArtifactCheck{a} }},
+		{"duplicate object check", "invalid artifact verification evidence", func(e *operator.Evidence) { e.Artifacts = []operator.ArtifactCheck{exact, exact} }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			evidence := ev
+			tc.change(&evidence)
+			if err := op.RestoreReconcile(ctx, evidence); err == nil || !strings.Contains(err.Error(), tc.message) {
+				t.Fatalf("inventory was not conservatively rejected: %v", err)
+			}
+			sqlOK(t, db.Owner, `SELECT set_config('app.org_id',$1,false)`, x["org"])
+			var currentEpoch, currentRevision int64
+			var state string
+			var targets, reservations int
+			mustOp(t, db.Owner.QueryRow(ctx, `SELECT (SELECT state_epoch FROM cosmoformer.backend_targets WHERE id=$1),(SELECT evidence_revision FROM cosmoformer.recovery_cases WHERE id=$2),(SELECT state FROM cosmoformer.artifacts WHERE id=$3),(SELECT count(*) FROM cosmoformer.backend_targets),(SELECT count(*) FROM cosmoformer.backend_reservations)+(SELECT count(*) FROM cosmoformer.worker_reservations)`, x["target"], x["recovery"], artifact).Scan(&currentEpoch, &currentRevision, &state, &targets, &reservations))
+			if currentEpoch != epoch || currentRevision != revision || state != "finalized" || targets != 1 || reservations != 2 {
+				t.Fatal("rejected inventory partially changed custody or evidence")
+			}
+			status, err := op.Status(ctx)
+			mustOp(t, err)
+			if !status.Maintenance || !status.Offline || status.RestoreReconciled {
+				t.Fatal("rejected inventory relaxed maintenance")
+			}
+		})
+	}
+	ev.Backends = []operator.Backend{adopted, binding}
+	mustOp(t, op.RestoreReconcile(ctx, ev))
+	var casesOpen, reservations int
+	sqlOK(t, db.Owner, `SELECT set_config('app.org_id',$1,false)`, x["org"])
+	mustOp(t, db.Owner.QueryRow(ctx, `SELECT (SELECT count(*) FROM cosmoformer.recovery_cases WHERE status='open'),(SELECT count(*) FROM cosmoformer.backend_reservations)+(SELECT count(*) FROM cosmoformer.worker_reservations)`).Scan(&casesOpen, &reservations))
+	if casesOpen != 2 || reservations != 2 {
+		t.Fatal("successful adoption bypassed recovery or released execution")
+	}
+}
+
+func TestOperatorOfflineRequiresCompleteIndependentStopEvidence(t *testing.T) {
+	db := testsupport.NewDatabase(t)
+	x := evidenceFixture(t, db)
+	db.App.Pool.Close()
+	op := openOperator(t, db)
+	mustOp(t, op.Enter(operatorCtx))
+	ev := stopEvidence(t, op, db)
+	for _, tc := range []struct {
+		name   string
+		change func(*operator.Evidence)
+	}{
+		{"writers not proven stopped", func(e *operator.Evidence) { e.WritersStopped = false }},
+		{"cleanup not proven stopped", func(e *operator.Evidence) { e.CleanupStopped = false }},
+		{"missing worker", func(e *operator.Evidence) { e.Workers = nil }},
+		{"stale generation", func(e *operator.Evidence) { w := e.Workers[0]; w.Generation++; e.Workers = []operator.WorkerStop{w} }},
+		{"duplicate worker", func(e *operator.Evidence) { e.Workers = append([]operator.WorkerStop{}, e.Workers[0], e.Workers[0]) }},
+		{"missing external reference", func(e *operator.Evidence) { w := e.Workers[0]; w.Reference = ""; e.Workers = []operator.WorkerStop{w} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			evidence := ev
+			tc.change(&evidence)
+			if err := op.Offline(operatorCtx, evidence); err == nil {
+				t.Fatal("missing stop facts accepted")
+			}
+			status, err := op.Status(operatorCtx)
+			mustOp(t, err)
+			if status.Offline || !status.Maintenance {
+				t.Fatal("unverified offline transition committed")
+			}
+			sqlOK(t, db.Owner, `SELECT set_config('app.org_id',$1,false)`, x["org"])
+			var unresolved bool
+			mustOp(t, db.Owner.QueryRow(operatorCtx, `SELECT closed_at IS NULL FROM cosmoformer.attempts WHERE id=$1`, x["attempt"]).Scan(&unresolved))
+			if !unresolved {
+				t.Fatal("stop assertion released unresolved execution")
+			}
+		})
+	}
+}
+
+func TestOperatorRotationDatabaseFailuresNeverActivatePartialCiphertext(t *testing.T) {
+	for _, tc := range []struct {
+		name, table, event, predicate string
+		reserved, atCommit            bool
+	}{
+		{"new-key registration", "crypto_keys", "INSERT", "true", false, false},
+		{"quota receipt", "key_rotations", "INSERT", "true", false, false},
+		{"ciphertext update", "secrets", "UPDATE", "true", true, false},
+		{"old-key retirement", "crypto_keys", "UPDATE", "NEW.state='retired'", true, false},
+		{"new-key activation", "crypto_keys", "UPDATE", "NEW.state='active'", true, false},
+		{"installation handoff", "installation", "UPDATE", "NEW.active_key_fingerprint IS DISTINCT FROM OLD.active_key_fingerprint", true, false},
+		{"commit receipt", "key_rotations", "UPDATE", "NEW.committed_at IS NOT NULL", true, false},
+		{"deferred commit failure", "operator_events", "INSERT", "NEW.action='key.rotate'", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := testsupport.NewDatabase(t)
+			ctx := operatorCtx
+			old, next := testCipher(t, 131), testCipher(t, 132)
+			registerSyntheticKey(t, db, old)
+			var orgs, ids []string
+			for i := 0; i < 2; i++ {
+				var org string
+				mustOp(t, db.Owner.QueryRow(ctx, `INSERT INTO cosmoformer.organizations(name) VALUES('Rotation rollback tenant') RETURNING id::text`).Scan(&org))
+				orgs = append(orgs, org)
+				ids = append(ids, addSyntheticSecret(t, db, old, org))
+			}
+			db.App.Pool.Close()
+			op := openOperator(t, db)
+			mustOp(t, op.Enter(ctx))
+			ev := stopEvidence(t, op, db)
+			// Closed fixture predicates only. Fail a real PostgreSQL write at each
+			// durable accounting/handoff boundary, including a deferred commit failure.
+			sqlOK(t, db.Owner, `CREATE FUNCTION cosmoformer.fixture_rotation_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF `+tc.predicate+` THEN RAISE EXCEPTION 'synthetic rotation database failure'; END IF; RETURN NEW; END $$`)
+			trigger := `CREATE TRIGGER fixture_rotation_failure BEFORE ` + tc.event + ` ON cosmoformer.` + tc.table + ` FOR EACH ROW EXECUTE FUNCTION cosmoformer.fixture_rotation_failure()`
+			if tc.atCommit {
+				trigger = `CREATE CONSTRAINT TRIGGER fixture_rotation_failure AFTER INSERT ON cosmoformer.operator_events DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION cosmoformer.fixture_rotation_failure()`
+			}
+			sqlOK(t, db.Owner, trigger)
+			err := op.Rotate(ctx, ev, runs.ID(), old, next)
+			if err == nil {
+				t.Fatal("rotation succeeded across injected database failure")
+			}
+			if tc.atCommit && !strings.Contains(err.Error(), "operator commit uncertain") {
+				t.Fatal("commit uncertainty was not reported conservatively", err)
+			}
+			status, err := op.Status(ctx)
+			mustOp(t, err)
+			if !status.Maintenance || !status.Offline || status.ActiveKey != hex.EncodeToString(oldFP(old)) {
+				t.Fatal("database failure activated a key or resumed writers")
+			}
+			var allocated int64
+			mustOp(t, db.Owner.QueryRow(ctx, `SELECT coalesce((SELECT reserved_encryptions FROM cosmoformer.crypto_keys WHERE fingerprint=$1),0)`, oldFP(next)).Scan(&allocated))
+			expected := int64(0)
+			if tc.reserved {
+				expected = 4096
+			}
+			if allocated != expected {
+				t.Fatal("reservation was refunded or allocated before a committed quota receipt", allocated, expected)
+			}
+			var activeOld, committedNew bool
+			mustOp(t, db.Owner.QueryRow(ctx, `SELECT EXISTS(SELECT FROM cosmoformer.crypto_keys WHERE fingerprint=$1 AND state='active'),EXISTS(SELECT FROM cosmoformer.key_rotations WHERE new_fingerprint=$2 AND committed_at IS NOT NULL)`, oldFP(old), oldFP(next)).Scan(&activeOld, &committedNew))
+			if !activeOld || committedNew {
+				t.Fatal("partial cryptographic metadata committed")
+			}
+			for i, org := range orgs {
+				sqlOK(t, db.Owner, `SELECT set_config('app.org_id',$1,false)`, org)
+				var encrypted []byte
+				var revision int64
+				mustOp(t, db.Owner.QueryRow(ctx, `SELECT encrypted_value,semantic_revision FROM cosmoformer.secrets WHERE id=$1`, ids[i]).Scan(&encrypted, &revision))
+				plain, err := old.Open(encrypted, cryptostore.AAD(org, ids[i], "managed_secret", 7))
+				if err != nil || string(plain) != "synthetic-secret" || revision != 7 {
+					t.Fatal("failure partially replaced tenant ciphertext", err)
+				}
+			}
+		})
+	}
+}
