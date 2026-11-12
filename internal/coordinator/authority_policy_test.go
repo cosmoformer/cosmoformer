@@ -25,7 +25,7 @@ func authorityFixture(t *testing.T) (runs.Assignment, []policyRow) {
 	}
 	// Storage response shapes include the ordinary preflight authority, exact
 	// execution metadata, current automation scope, credentials and binding.
-	rows := []policyRow{row(true), row("", project, env, repo, true), row(true), row(true), row(true), row(int64(1), s.Source.Commit)}
+	rows := []policyRow{row(true), row("", project, env, repo, true, "plan"), row(true), row(true), row(true), row(int64(1), s.Source.Commit)}
 	for range s.Grants {
 		rows = append(rows, row(true))
 	}
@@ -88,7 +88,7 @@ func TestUnimplementedExecutionModesFailBeforeReadingStorage(t *testing.T) {
 	c := policyCoordinator()
 	codeIs(t, c.executionAuthority(context.Background(), &policyTx{}, runs.Assignment{}), "INVALID_SPEC")
 	a.Kind = "apply"
-	codeIs(t, c.executionAuthority(context.Background(), &policyTx{}, a), "APPLY_PREREQUISITES_UNAVAILABLE")
+	codeIs(t, c.executionAuthority(context.Background(), &policyTx{}, a), "PLAN_IDENTITY_CHANGED")
 	a.Kind = "plan"
 	attributes := map[string]any{}
 	for k, v := range a.Execution.Backend.Attributes {

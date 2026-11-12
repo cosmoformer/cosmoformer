@@ -13,9 +13,9 @@ import (
 )
 
 type Config struct {
-	Listen, Origin, DSNFile, UnixSocket         string
-	Artifact                                    evidence.Settings
-	PlanSeconds, PreflightSeconds, PlanTTLHours int64
+	Listen, Origin, DSNFile, UnixSocket                       string
+	Artifact                                                  evidence.Settings
+	PlanSeconds, ApplySeconds, PreflightSeconds, PlanTTLHours int64
 }
 
 func Load() (Config, error) {
@@ -37,6 +37,9 @@ func Load() (Config, error) {
 	if c.PlanSeconds, budgetErr = readBound("PLAN_SECONDS", 1200, 30, 3300); budgetErr != nil {
 		return c, budgetErr
 	}
+	if c.ApplySeconds, budgetErr = readBound("APPLY_SECONDS", 2400, 30, 3300); budgetErr != nil {
+		return c, budgetErr
+	}
 	if c.PreflightSeconds, budgetErr = readBound("PREFLIGHT_SECONDS", 300, 30, 3300); budgetErr != nil {
 		return c, budgetErr
 	}
@@ -49,7 +52,7 @@ func Load() (Config, error) {
 	return c, c.Validate()
 }
 func (c Config) Validate() error {
-	if c.PlanSeconds != 0 && (c.PlanSeconds < 30 || c.PlanSeconds > 3300) || c.PreflightSeconds != 0 && (c.PreflightSeconds < 30 || c.PreflightSeconds > 3300) || c.PlanTTLHours != 0 && (c.PlanTTLHours < 1 || c.PlanTTLHours > 720) {
+	if c.ApplySeconds != 0 && (c.ApplySeconds < 30 || c.ApplySeconds > 3300) || c.PlanSeconds != 0 && (c.PlanSeconds < 30 || c.PlanSeconds > 3300) || c.PreflightSeconds != 0 && (c.PreflightSeconds < 30 || c.PreflightSeconds > 3300) || c.PlanTTLHours != 0 && (c.PlanTTLHours < 1 || c.PlanTTLHours > 720) {
 		return errors.New("invalid planning budget or TTL setting")
 	}
 

@@ -235,14 +235,14 @@ func TestLaunchIssuanceRequiresUsableBudgetAndSuccessfulPersistence(t *testing.T
 			}
 			budget := budgetRow()
 			budget.values[2] = end
-			rows := []policyRow{budget, row(end, int64(40*time.Second)), row(time.Unix(100, 0))}
+			rows := []policyRow{budget, row(true), row(end, int64(40*time.Second)), row(time.Unix(100, 0))}
 			failure := errors.New("storage failed")
 			tx := &policyTx{rows: rows}
 			if scenario == "deadline unavailable" {
-				tx.rows[1] = policyRow{err: failure}
+				tx.rows[2] = policyRow{err: failure}
 			}
 			if scenario == "insert failed" {
-				tx.rows[2] = policyRow{err: failure}
+				tx.rows[3] = policyRow{err: failure}
 			}
 			if scenario == "attempt update failed" {
 				tx.writeErr = failure

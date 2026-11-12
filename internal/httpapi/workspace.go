@@ -43,29 +43,42 @@ type WorkspaceListInput struct {
 	Before      string `query:"before" format:"uuid"`
 	Limit       int    `query:"limit" minimum:"1" maximum:"100" default:"50"`
 }
+type OperationPublic struct {
+	CanRetry      bool      `json:"can_retry,omitempty"`
+	CanPrioritize bool      `json:"can_prioritize,omitempty"`
+	ID            string    `json:"id" format:"uuid"`
+	Kind          string    `json:"kind" enum:"plan,apply"`
+	Status        string    `json:"status"`
+	Reason        string    `json:"reason"`
+	Priority      string    `json:"priority"`
+	Revision      int64     `json:"revision"`
+	AcceptedAt    time.Time `json:"accepted_at"`
+	QueueReason   string    `json:"queue_reason"`
+}
 type RunPublic struct {
-	ID              string      `json:"id" format:"uuid"`
-	StackID         string      `json:"stack_id" format:"uuid"`
-	StackName       string      `json:"stack_name"`
-	ProjectID       string      `json:"project_id" format:"uuid"`
-	ProjectName     string      `json:"project_name"`
-	EnvironmentID   string      `json:"environment_id" format:"uuid"`
-	EnvironmentName string      `json:"environment_name"`
-	Commit          string      `json:"commit"`
-	SourceKind      string      `json:"source_kind" enum:"branch,pr"`
-	SourceKey       string      `json:"source_key"`
-	SourceURL       string      `json:"source_url"`
-	SourceRoot      string      `json:"source_root"`
-	Purpose         string      `json:"purpose"`
-	OperationID     string      `json:"operation_id" format:"uuid"`
-	NativePlanning  bool        `json:"native_planning"`
-	Status          string      `json:"status"`
-	Reason          string      `json:"reason"`
-	QueueReason     string      `json:"queue_reason"`
-	Priority        string      `json:"priority" enum:"low,medium,high"`
-	CreatedAt       time.Time   `json:"created_at"`
-	AcceptedAt      time.Time   `json:"accepted_at"`
-	Plan            *PlanStatus `json:"plan,omitempty"`
+	Apply           *OperationPublic `json:"apply,omitempty"`
+	ID              string           `json:"id" format:"uuid"`
+	StackID         string           `json:"stack_id" format:"uuid"`
+	StackName       string           `json:"stack_name"`
+	ProjectID       string           `json:"project_id" format:"uuid"`
+	ProjectName     string           `json:"project_name"`
+	EnvironmentID   string           `json:"environment_id" format:"uuid"`
+	EnvironmentName string           `json:"environment_name"`
+	Commit          string           `json:"commit"`
+	SourceKind      string           `json:"source_kind" enum:"branch,pr"`
+	SourceKey       string           `json:"source_key"`
+	SourceURL       string           `json:"source_url"`
+	SourceRoot      string           `json:"source_root"`
+	Purpose         string           `json:"purpose"`
+	OperationID     string           `json:"operation_id" format:"uuid"`
+	NativePlanning  bool             `json:"native_planning"`
+	Status          string           `json:"status"`
+	Reason          string           `json:"reason"`
+	QueueReason     string           `json:"queue_reason"`
+	Priority        string           `json:"priority" enum:"low,medium,high"`
+	CreatedAt       time.Time        `json:"created_at"`
+	AcceptedAt      time.Time        `json:"accepted_at"`
+	Plan            *PlanStatus      `json:"plan,omitempty"`
 }
 type RunsOutput struct {
 	Body struct {
@@ -74,6 +87,8 @@ type RunsOutput struct {
 	}
 }
 type AttemptPublic struct {
+	OperationID    string          `json:"operation_id,omitempty"`
+	Kind           string          `json:"kind,omitempty"`
 	Revision       int64           `json:"revision,omitempty"`
 	Ordinal        int64           `json:"command_ordinal,omitempty"`
 	CanControl     bool            `json:"can_control,omitempty"`
@@ -99,13 +114,14 @@ type RunReadInput struct {
 }
 type RunOutput struct {
 	Body struct {
-		Recovery      *RecoveryPublic  `json:"recovery,omitempty"`
-		Run           RunPublic        `json:"run"`
-		AttemptsNext  string           `json:"attempts_next,omitempty"`
-		ArtifactsNext string           `json:"raw_artifacts_next,omitempty"`
-		Attempts      []AttemptPublic  `json:"attempts" nullable:"false"`
-		CanReadRaw    bool             `json:"can_read_raw"`
-		Artifacts     []ReviewArtifact `json:"raw_artifacts" nullable:"false"`
+		Operations    []OperationPublic `json:"operations,omitempty"`
+		Recovery      *RecoveryPublic   `json:"recovery,omitempty"`
+		Run           RunPublic         `json:"run"`
+		AttemptsNext  string            `json:"attempts_next,omitempty"`
+		ArtifactsNext string            `json:"raw_artifacts_next,omitempty"`
+		Attempts      []AttemptPublic   `json:"attempts" nullable:"false"`
+		CanReadRaw    bool              `json:"can_read_raw"`
+		Artifacts     []ReviewArtifact  `json:"raw_artifacts" nullable:"false"`
 	}
 }
 
@@ -139,6 +155,17 @@ func readRunPlan(ctx context.Context, tx pgx.Tx, r *RunPublic) error {
 		return err
 	}
 	r.Plan = p
+	ops, e := runOperations(ctx, tx, r.ID)
+	if e != nil {
+		return e
+	}
+	for _, o := range ops {
+		if o.Kind == "apply" {
+			copy := o
+			r.Apply = &copy
+			break
+		}
+	}
 	return nil
 }
 func planEvidenceStatus(ctx context.Context, tx pgx.Tx, p *PlanStatus) error {
@@ -220,14 +247,18 @@ func (a *Server) registerWorkspace(api huma.API) {
 			if err = readRunPlan(ctx, tx, &out.Body.Run); err != nil {
 				return err
 			}
+			out.Body.Operations, err = runOperations(ctx, tx, in.ID, grants)
+			if err != nil {
+				return err
+			}
 			out.Body.CanReadRaw = access.Allows(grants, out.Body.Run.ProjectID, out.Body.Run.EnvironmentID, access.RawEvidenceRead)
-			rows, err := tx.Query(ctx, `SELECT a.id::text,w.phase,a.state,coalesce(a.outcome,''),a.created_at,a.closed_at FROM cosmoformer.attempts a JOIN cosmoformer.work_items w ON w.id=a.work_item_id WHERE a.operation_id=$1 AND ($2='' OR (a.created_at,a.id)<(SELECT created_at,id FROM cosmoformer.attempts WHERE id::text=$2 AND operation_id=$1)) ORDER BY a.created_at DESC,a.id DESC LIMIT 101`, out.Body.Run.OperationID, in.AttemptBefore)
+			rows, err := tx.Query(ctx, `SELECT a.id::text,w.phase,a.state,coalesce(a.outcome,''),a.created_at,a.closed_at,a.operation_id::text,o.kind FROM cosmoformer.attempts a JOIN cosmoformer.work_items w ON w.id=a.work_item_id JOIN cosmoformer.operations o ON o.id=a.operation_id WHERE o.run_id=$1 AND ($2='' OR (a.created_at,a.id)<(SELECT a.created_at,a.id FROM cosmoformer.attempts a JOIN cosmoformer.operations o ON o.id=a.operation_id WHERE a.id::text=$2 AND o.run_id=$1)) ORDER BY a.created_at DESC,a.id DESC LIMIT 101`, out.Body.Run.ID, in.AttemptBefore)
 			if err != nil {
 				return err
 			}
 			for rows.Next() {
 				var p AttemptPublic
-				if err = rows.Scan(&p.ID, &p.Phase, &p.State, &p.Outcome, &p.CreatedAt, &p.ClosedAt); err != nil {
+				if err = rows.Scan(&p.ID, &p.Phase, &p.State, &p.Outcome, &p.CreatedAt, &p.ClosedAt, &p.OperationID, &p.Kind); err != nil {
 					rows.Close()
 					return err
 				}
@@ -255,7 +286,7 @@ func (a *Server) registerWorkspace(api huma.API) {
 				}
 			}
 			var recoveryID string
-			err = tx.QueryRow(ctx, `SELECT r.id::text FROM cosmoformer.recovery_cases r WHERE r.stack_id=$1 AND (r.status='open' OR r.origin_attempt_id IN(SELECT id FROM cosmoformer.attempts WHERE operation_id=$2) OR r.id=(SELECT recovery_case_id FROM cosmoformer.operations WHERE id=$2)) ORDER BY r.opened_at DESC LIMIT 1`, out.Body.Run.StackID, out.Body.Run.OperationID).Scan(&recoveryID)
+			err = tx.QueryRow(ctx, `SELECT r.id::text FROM cosmoformer.recovery_cases r WHERE r.stack_id=$1 AND (r.status='open' OR r.origin_attempt_id IN(SELECT a.id FROM cosmoformer.attempts a JOIN cosmoformer.operations o ON o.id=a.operation_id WHERE o.run_id=$2) OR r.id IN(SELECT recovery_case_id FROM cosmoformer.operations WHERE run_id=$2)) ORDER BY r.opened_at DESC,r.id DESC LIMIT 1`, out.Body.Run.StackID, out.Body.Run.ID).Scan(&recoveryID)
 			if err != nil && err != pgx.ErrNoRows {
 				return err
 			}
@@ -270,7 +301,7 @@ func (a *Server) registerWorkspace(api huma.API) {
 			if !out.Body.CanReadRaw {
 				return nil
 			}
-			rows, err = tx.Query(ctx, `SELECT a.id::text,a.kind,a.state FROM cosmoformer.artifacts a JOIN cosmoformer.attempts t ON t.id=a.attempt_id WHERE t.operation_id=$1 AND a.kind IN ('binary_plan','raw_plan_json','manifest','pre_init_spec','provider_schema','provider_lock') AND ($2='' OR (a.created_at,a.id)<(SELECT created_at,id FROM cosmoformer.artifacts WHERE id::text=$2 AND attempt_id IN(SELECT id FROM cosmoformer.attempts WHERE operation_id=$1))) ORDER BY a.created_at DESC,a.id DESC LIMIT 101`, out.Body.Run.OperationID, in.ArtifactBefore)
+			rows, err = tx.Query(ctx, `SELECT a.id::text,a.kind,a.state FROM cosmoformer.artifacts a JOIN cosmoformer.attempts t ON t.id=a.attempt_id JOIN cosmoformer.operations o ON o.id=t.operation_id WHERE o.run_id=$1 AND a.kind IN ('binary_plan','raw_plan_json','manifest','pre_init_spec','provider_schema','provider_lock') AND ($2='' OR (a.created_at,a.id)<(SELECT c.created_at,c.id FROM cosmoformer.artifacts c JOIN cosmoformer.attempts t ON t.id=c.attempt_id JOIN cosmoformer.operations o ON o.id=t.operation_id WHERE c.id::text=$2 AND o.run_id=$1 AND c.kind IN ('binary_plan','raw_plan_json','manifest','pre_init_spec','provider_schema','provider_lock'))) ORDER BY a.created_at DESC,a.id DESC LIMIT 101`, out.Body.Run.ID, in.ArtifactBefore)
 			if err != nil {
 				return err
 			}
@@ -380,4 +411,32 @@ func (a *Server) registerStackReads(api huma.API) {
 		})
 		return out, err
 	})
+}
+
+func runOperations(ctx context.Context, tx pgx.Tx, run string, scopes ...[]access.Grant) ([]OperationPublic, error) {
+	rows, e := tx.Query(ctx, `SELECT o.id::text,o.kind,o.status,coalesce(o.terminal_reason,''),o.priority,o.revision,o.accepted_at,CASE WHEN o.status<>'queued' THEN '' WHEN EXISTS(SELECT FROM cosmoformer.recovery_cases r WHERE r.stack_id=o.stack_id AND r.status='open') THEN 'RECOVERY_REQUIRED' WHEN EXISTS(SELECT FROM cosmoformer.attempts a WHERE a.stack_id=o.stack_id AND a.closed_at IS NULL) THEN 'STACK_BUSY' WHEN NOT EXISTS(SELECT FROM cosmoformer.workers cw WHERE cw.pool_id::text=w.assignment_spec->'pool'->>'id' AND cw.runtime_id::text=w.assignment_spec->'engine'->>'runtime_id' AND NOT cw.paused AND cw.last_contact_at>clock_timestamp()-interval '30 seconds' AND cw.capabilities->'supported_work_phases' ? w.phase AND cw.tags @> ARRAY(SELECT jsonb_array_elements_text(coalesce(w.assignment_spec->'pool'->'tags','[]'::jsonb)))) THEN 'NO_COMPATIBLE_WORKER' ELSE 'WAITING_CAPACITY' END,s.project_id::text,s.environment_id::text,EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=o.id AND outcome='preparation_failed') AND NOT EXISTS(SELECT FROM cosmoformer.attempts WHERE operation_id=o.id AND (ever_permitted OR closed_at IS NULL OR outcome NOT IN ('success','preparation_failed'))) FROM cosmoformer.operations o JOIN cosmoformer.stacks s ON s.id=o.stack_id LEFT JOIN LATERAL(SELECT assignment_spec,phase FROM cosmoformer.work_items WHERE operation_id=o.id ORDER BY CASE phase WHEN 'execution' THEN 0 ELSE 1 END LIMIT 1) w ON true WHERE o.run_id=$1 ORDER BY o.accepted_at DESC,o.id DESC LIMIT 100`, run)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := []OperationPublic{}
+	for rows.Next() {
+		var o OperationPublic
+		var project, env string
+		var retry bool
+		if e = rows.Scan(&o.ID, &o.Kind, &o.Status, &o.Reason, &o.Priority, &o.Revision, &o.AcceptedAt, &o.QueueReason, &project, &env, &retry); e != nil {
+			return nil, e
+		}
+		if len(scopes) > 0 {
+			action := access.Plan
+			if o.Kind == "apply" {
+				action = access.Apply
+			}
+			allowed := access.Allows(scopes[0], project, env, action)
+			o.CanRetry = allowed && retry && o.Status == "failed"
+			o.CanPrioritize = o.Status == "queued" && (allowed || access.Allows(scopes[0], project, env, access.Manage))
+		}
+		out = append(out, o)
+	}
+	return out, rows.Err()
 }

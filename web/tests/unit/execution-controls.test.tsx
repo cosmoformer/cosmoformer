@@ -109,6 +109,6 @@ it.each(['approval', 'clear'] as const)('shows trusted-clock rejection for recov
     fireEvent.click(screen.getByRole('button', { name: action === 'clear' ? 'Clear recovery' : 'Approve recovery evidence' }));
     fireEvent.click(screen.getByRole('button', { name: 'Confirm recovery action' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Trusted server time is unavailable.');
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(mutations).toHaveLength(1); expect(reload).toHaveBeenCalledOnce(); expect(denied).not.toHaveBeenCalled();
 });

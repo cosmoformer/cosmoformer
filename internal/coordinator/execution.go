@@ -35,8 +35,16 @@ func (c *Coordinator) executionAuthority(ctx context.Context, tx pgx.Tx, a runs.
 	}
 	s := *a.Execution
 
-	if a.Kind != "plan" {
-		return runs.Fail("APPLY_PREREQUISITES_UNAVAILABLE")
+	if a.Kind != "plan" && a.Kind != "apply" {
+		return runs.Fail("COMMAND_UNSUPPORTED")
+	}
+	if a.Kind == "apply" {
+		if e := applyOperationHolds(ctx, tx, s, a.OperationID); e != nil {
+			return e
+		}
+		if e := ApplyEligibility(ctx, tx, a.StackID, s); e != nil {
+			return e
+		}
 	}
 	if kms, _ := s.Backend.Attributes["kms_key_id"].(string); kms != "" {
 		return runs.Fail("KMS_GRANT_PREREQUISITES_UNAVAILABLE")
@@ -136,7 +144,7 @@ func (c *Coordinator) executionAuthority(ctx context.Context, tx pgx.Tx, a runs.
 	}
 	// Read-only boolean check; authority revalidation must not add permanent
 	// backend claims or reveal installation-wide target records.
-	if e = tx.QueryRow(ctx, `SELECT cosmoformer.execution_binding_matches($1,$2,$3,$4,$5,$6) AND EXISTS(SELECT FROM cosmoformer.plans WHERE attempt_id=$1 AND status='assembling' AND state_epoch=cosmoformer.execution_target_epoch($1) AND profile_id=$7 AND rule_version=$8)`, a.AttemptID, s.Backend.Target.Partition, s.Backend.Target.Bucket, s.Backend.Target.Key, s.Backend.Profile, nullable(s.Backend.TableARN), s.ProfileID, s.RuleVersion).Scan(&valid); e != nil {
+	if e = tx.QueryRow(ctx, `SELECT cosmoformer.execution_binding_matches($1,$2,$3,$4,$5,$6) AND ($9='apply' OR EXISTS(SELECT FROM cosmoformer.plans WHERE attempt_id=$1 AND status='assembling' AND state_epoch=cosmoformer.execution_target_epoch($1) AND profile_id=$7 AND rule_version=$8))`, a.AttemptID, s.Backend.Target.Partition, s.Backend.Target.Bucket, s.Backend.Target.Key, s.Backend.Profile, nullable(s.Backend.TableARN), s.ProfileID, s.RuleVersion, a.Kind).Scan(&valid); e != nil {
 		return e
 	}
 	if !valid {
@@ -246,6 +254,13 @@ func (c *Coordinator) executionEvidence(ctx context.Context, token, route string
 			return out, e
 		}
 		if p.Outcome == "success" {
+			var kind string
+			if e := c.WithEvidenceAttempt(ctx, token, m.Identity, m.AttemptID, func(tx pgx.Tx, _ Worker, a runs.Assignment) error { kind = a.Kind; return nil }); e != nil {
+				return out, e
+			}
+			if kind == "apply" {
+				break
+			}
 			var e error
 			out.Planning, e = c.readPlanningEvidence(ctx, token, m, p)
 			if e != nil {
@@ -530,9 +545,16 @@ func (c *Coordinator) executionTransition(ctx context.Context, token, route stri
 	if e != nil {
 		return nil, e
 	}
+
 	var observation *Observation
 	var facts bitbucket.Facts
-	if route == "start-permission" || route == "result" && payload.(*runs.ExecutionResult).Outcome == "success" {
+	isPlan := true
+	if route == "result" {
+		if e := c.WithEvidenceAttempt(ctx, token, m.Identity, m.AttemptID, func(tx pgx.Tx, _ Worker, a runs.Assignment) error { isPlan = a.Kind == "plan"; return nil }); e != nil {
+			return nil, e
+		}
+	}
+	if route == "start-permission" || route == "result" && isPlan && payload.(*runs.ExecutionResult).Outcome == "success" {
 		// Persist clock failure independently of a rejected command transaction.
 		good := false
 		e = c.workerTx(ctx, token, func(tx pgx.Tx, w Worker) error {
@@ -541,7 +563,8 @@ func (c *Coordinator) executionTransition(ctx context.Context, token, route stri
 			}
 			tick, e := c.Clock.Now()
 			if e != nil {
-				return runs.Fail("CLOCK_UNAVAILABLE")
+				_, e = tx.Exec(ctx, `SELECT cosmoformer.execution_clock_failed()`)
+				return e
 			}
 			return tx.QueryRow(ctx, `SELECT cosmoformer.execution_clock_observe($1,$2)`, c.Instance, int64(tick)).Scan(&good)
 		})
@@ -550,6 +573,14 @@ func (c *Coordinator) executionTransition(ctx context.Context, token, route stri
 		}
 		if !good {
 			return nil, runs.Fail("CLOCK_UNRELIABLE")
+		}
+		if route == "start-permission" {
+			p := payload.(*runs.CommandRequest)
+			if p.Command == "init" || p.Command == "apply" {
+				if e = c.verifyRetainedApply(ctx, token, m); e != nil {
+					return nil, e
+				}
+			}
 		}
 		stateGate := route == "result"
 		if p, ok := payload.(*runs.CommandRequest); ok {
@@ -579,7 +610,9 @@ func (c *Coordinator) executionTransition(ctx context.Context, token, route stri
 			if e != nil {
 				return nil, e
 			}
-			facts, e = c.ObserveSource(ctx, org, observation.SubjectID)
+			readCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			facts, e = c.ObserveSource(readCtx, org, observation.SubjectID)
+			cancel()
 			contextChanged := errors.Is(e, bitbucket.ErrContextChanged)
 			if e != nil && !contextChanged {
 				return nil, runs.Fail("SOURCE_UNAVAILABLE")
@@ -601,6 +634,7 @@ func (c *Coordinator) executionTransition(ctx context.Context, token, route stri
 		}
 	}
 	var out runs.Transition
+	var clockDenied error
 	attention := false
 	e = c.workerTx(ctx, token, func(tx pgx.Tx, w Worker) error {
 		if e := c.current(ctx, tx, w, m.Identity, false); e != nil {
@@ -675,6 +709,21 @@ func (c *Coordinator) executionTransition(ctx context.Context, token, route stri
 		}
 		out = runs.Transition{Accepted: true, NextSeq: m.Seq + 1, AttemptState: state, OperationStatus: status, Revision: revision + 1}
 		if route == "prepare-result" || route == "manifest-seal" || route == "start-permission" {
+			if route == "start-permission" {
+				tick, err := c.Clock.Now()
+				good := false
+				if err != nil {
+					if _, e = tx.Exec(ctx, `SELECT cosmoformer.execution_clock_failed()`); e != nil {
+						return e
+					}
+				} else if e = tx.QueryRow(ctx, `SELECT cosmoformer.execution_clock_observe($1,$2)`, c.Instance, int64(tick)).Scan(&good); e != nil {
+					return e
+				}
+				if !good {
+					clockDenied = runs.Fail("CLOCK_UNRELIABLE")
+					return nil
+				}
+			}
 			if e = c.current(ctx, tx, w, m.Identity, true); e != nil {
 				return e
 			}
@@ -685,6 +734,13 @@ func (c *Coordinator) executionTransition(ctx context.Context, token, route stri
 				return e
 			}
 			if _, e = c.executionBudget(ctx, tx, m.AttemptID, route != "prepare-result"); e != nil {
+				if route == "start-permission" && runs.Code(e) == "CLOCK_UNAVAILABLE" {
+					if _, e = tx.Exec(ctx, `SELECT cosmoformer.execution_clock_failed()`); e != nil {
+						return e
+					}
+					clockDenied = runs.Fail("CLOCK_UNRELIABLE")
+					return nil
+				}
 				return e
 			}
 			if e = c.exactReservations(ctx, tx, m.AttemptID); e != nil {
@@ -824,9 +880,7 @@ func (c *Coordinator) executionTransition(ctx context.Context, token, route stri
 			if runs.Digest(descriptor) != p.Digest {
 				return runs.Fail("COMMAND_DIGEST_MISMATCH")
 			}
-			if a.Kind == "apply" {
-				return runs.Fail("APPLY_PREREQUISITES_UNAVAILABLE")
-			}
+
 			if p.Ordinal > 1 {
 				var okay bool
 				if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM cosmoformer.start_permissions WHERE attempt_id=$1 AND ordinal=$2 AND status='stopped' AND ((stop_facts->>'exit_code')::int=0 OR (command='plan' AND (stop_facts->>'exit_code')::int=2)))`, m.AttemptID, p.Ordinal-1).Scan(&okay); e != nil {
@@ -845,6 +899,10 @@ func (c *Coordinator) executionTransition(ctx context.Context, token, route stri
 				}
 			}
 			if e = c.issuePermission(ctx, tx, w, *a, m, *p, observation, &out); e != nil {
+				if runs.Code(e) == "CLOCK_UNRELIABLE" {
+					clockDenied = e
+					return nil
+				}
 				return e
 			}
 		case "controls/ack":
@@ -868,7 +926,7 @@ func (c *Coordinator) executionTransition(ctx context.Context, token, route stri
 			}
 		case "result":
 			p := payload.(*runs.ExecutionResult)
-			if p.Outcome == "success" {
+			if p.Outcome == "success" && a.Kind == "plan" {
 				if observation == nil {
 					return runs.Fail("SOURCE_OBSERVATION_REQUIRED")
 				}
@@ -908,6 +966,9 @@ func (c *Coordinator) executionTransition(ctx context.Context, token, route stri
 		_, e = tx.Exec(ctx, `INSERT INTO cosmoformer.attempt_messages(org_id,attempt_id,sequence,message_id,digest,payload,command_ordinal,kind) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, w.OrgID, m.AttemptID, m.Seq, m.MessageID, nativeMessageDigest(route, m, payload), mustJSON(out), messageOrdinal, route)
 		return e
 	})
+	if e == nil && clockDenied != nil {
+		return nil, clockDenied
+	}
 	if e == nil && attention {
 		e = runs.Fail("MESSAGE_CONFLICT")
 	}
@@ -931,7 +992,20 @@ func (c *Coordinator) exactReservations(ctx context.Context, tx pgx.Tx, attempt 
 func (c *Coordinator) issuePermission(ctx context.Context, tx pgx.Tx, w Worker, a runs.Assignment, m runs.Message, p runs.CommandRequest, observation *Observation, out *runs.Transition) error {
 	tick, e := c.executionBudget(ctx, tx, m.AttemptID, true)
 	if e != nil {
+		if runs.Code(e) == "CLOCK_UNAVAILABLE" {
+			if _, err := tx.Exec(ctx, `SELECT cosmoformer.execution_clock_failed()`); err != nil {
+				return err
+			}
+			return runs.Fail("CLOCK_UNRELIABLE")
+		}
 		return e
+	}
+	good := false
+	if e = tx.QueryRow(ctx, `SELECT cosmoformer.execution_clock_observe($1,$2)`, c.Instance, int64(tick)).Scan(&good); e != nil {
+		return e
+	}
+	if !good {
+		return runs.Fail("CLOCK_UNRELIABLE")
 	}
 	var deadline, credential int64
 	if e = tx.QueryRow(ctx, `SELECT deadline_tick,credential_deadline_tick FROM cosmoformer.attempts WHERE id=$1`, m.AttemptID).Scan(&deadline, &credential); e != nil {
@@ -949,6 +1023,13 @@ func (c *Coordinator) issuePermission(ctx context.Context, tx pgx.Tx, w Worker, 
 			return e
 		}
 		observationID = id
+	}
+	if a.Kind == "apply" {
+		var planMS int64
+		if e = tx.QueryRow(ctx, `SELECT greatest(0,floor(extract(epoch FROM (expires_at-clock_timestamp()))*1000))::bigint FROM cosmoformer.plans WHERE id=$1`, a.Execution.RetainedPlan.ID).Scan(&planMS); e != nil {
+			return e
+		}
+		remaining = min(remaining, planMS)
 	}
 	remaining -= 100
 	if remaining <= 0 {

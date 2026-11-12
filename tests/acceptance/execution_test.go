@@ -43,12 +43,15 @@ func newExecutionFixtureForSource(t *testing.T, source map[string]any) *executio
 	return newExecutionFixtureForSourceProfile(t, source, false)
 }
 func newExecutionFixtureForSourceProfile(t *testing.T, source map[string]any, review bool, minimum ...int) *executionFixture {
+	return newExecutionFixtureForSourcePolicy(t, source, review, false, minimum...)
+}
+func newExecutionFixtureForSourcePolicy(t *testing.T, source map[string]any, review, allowPR bool, minimum ...int) *executionFixture {
 	t.Helper()
 	var ticks *testClock
 	if len(minimum) > 0 {
 		ticks = &testClock{tick: time.Second, start: time.Now()}
 	}
-	f := newPreflightFixtureForSourceClock(t, syntheticNativeEvidence{}, source, ticks)
+	f := newPreflightFixtureForSourcePolicyClock(t, syntheticNativeEvidence{}, source, ticks, allowPR)
 	ctx := context.Background()
 	if e := f.agent.Admit(ctx); e != nil {
 		t.Fatal(e)

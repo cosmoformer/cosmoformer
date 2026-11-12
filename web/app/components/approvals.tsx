@@ -52,7 +52,7 @@ export function Approvals({ org, run, onDenied }: { org: string; run: Schema['Ru
             <p className="approval-count"><strong>{summary.counted_approvals} of {summary.minimum}</strong> distinct approvals currently counted</p>
             <p>{summary.own_counted ? 'Your approval currently counts.' : summary.own_approved ? 'Your past vote is retained but does not currently count.' : 'You have no current approval on this plan.'}</p>
             <ul>{summary.blocked_reasons.map(code => <li key={code}>{reasons[code] ?? 'Current plan eligibility needs attention. Refresh this run.'}</li>)}</ul>
-            <p className="muted">{summary.source_observed_at ? `Last recorded source observation: ${time(summary.source_observed_at)}. ` : ''}Approve performs a new Bitbucket check. Counts reflect current account, membership and approval permission. Apply is not available.</p>
+            <p className="muted">{summary.source_observed_at ? `Last recorded source observation: ${time(summary.source_observed_at)}. ` : ''}Approve performs a new Bitbucket check. Counts reflect current account, membership and approval permission.</p>
             <div className="actions"><button disabled={!canApprove || busy} onClick={() => { setError(''); setConfirm(true); }}>Approve</button><button disabled={!summary.can_withdraw || busy} onClick={() => void vote(false)}>Withdraw my approval</button></div>
         </>}
         {error && <p className="error" role="alert">{error}</p>}{message && <p role="status">{message}</p>}

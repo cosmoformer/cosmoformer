@@ -61,10 +61,13 @@ func New(expectedBootstrap string, assignment runs.Assignment, worker runs.Ident
 }
 
 func newAccess(expected string, a runs.Assignment, worker runs.Identity, pollAnchor time.Duration, registry *evidence.Registry, ticks clock.Source, wall func() time.Time, clients clients) (*Access, error) {
-	if a.Phase != "execution" || a.Kind != "plan" || a.Execution == nil || a.Execution.Validate() != nil || runs.Digest(a.Execution) != a.Digest || !catalog.UUID(a.AttemptID) || !catalog.UUID(a.Platform) || !catalog.UUID(worker.WorkerID) || !catalog.UUID(worker.Agent) || worker.Generation < 1 || pollAnchor < 0 || registry == nil || ticks == nil || wall == nil || a.CapSeconds < 30 || a.CapSeconds > sessionSeconds-300 || a.RemainingMS > a.CapSeconds*1000 || clock.Conservative(a.RemainingMS) <= 0 || a.RuntimeID != a.Execution.Engine.ID {
+	if a.Phase != "execution" || (a.Kind != "plan" && a.Kind != "apply") || a.Execution == nil || a.Execution.Validate() != nil || runs.Digest(a.Execution) != a.Digest || !catalog.UUID(a.AttemptID) || !catalog.UUID(a.Platform) || !catalog.UUID(worker.WorkerID) || !catalog.UUID(worker.Agent) || worker.Generation < 1 || pollAnchor < 0 || registry == nil || ticks == nil || wall == nil || a.CapSeconds < 30 || a.CapSeconds > sessionSeconds-300 || a.RemainingMS > a.CapSeconds*1000 || clock.Conservative(a.RemainingMS) <= 0 || a.RuntimeID != a.Execution.Engine.ID {
 		return nil, ErrAccess
 	}
 	s := a.Execution
+	if a.Kind == "apply" && !s.RetainedPlan.Valid() || a.Kind == "plan" && s.RetainedPlan != nil {
+		return nil, ErrAccess
+	}
 	b, ok := parseRole(expected)
 	r, roleOK := parseRole(s.AWS.RoleARN)
 	if !ok || !roleOK || expected != s.AWS.Bootstrap || r.account != s.AWS.Account || r.partition != s.Backend.Target.Partition || b.partition != r.partition {

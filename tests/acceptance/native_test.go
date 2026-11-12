@@ -82,7 +82,7 @@ func (b *cappedNativeOutput) Write(p []byte) (int, error) {
 	return b.Buffer.Write(p)
 }
 func (h nativeHarness) env(workspace string) []string {
-	env := []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=" + h.home, "LANG=C.UTF-8", "TF_IN_AUTOMATION=1", "CHECKPOINT_DISABLE=1", "TF_CLI_CONFIG_FILE=" + h.cli, "AWS_ACCESS_KEY_ID=fixture", "AWS_SECRET_ACCESS_KEY=fixture-secret", "AWS_EC2_METADATA_DISABLED=true", "AWS_CONFIG_FILE=/dev/null", "AWS_SHARED_CREDENTIALS_FILE=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0"}
+	env := []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=" + h.home, "TMPDIR=" + os.TempDir(), "LANG=C.UTF-8", "TF_IN_AUTOMATION=1", "CHECKPOINT_DISABLE=1", "TF_CLI_CONFIG_FILE=" + h.cli, "AWS_ACCESS_KEY_ID=fixture", "AWS_SECRET_ACCESS_KEY=fixture-secret", "AWS_EC2_METADATA_DISABLED=true", "AWS_CONFIG_FILE=/dev/null", "AWS_SHARED_CREDENTIALS_FILE=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0"}
 	if workspace != "" {
 		env = append(env, "TF_WORKSPACE="+workspace)
 	}

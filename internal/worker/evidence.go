@@ -189,3 +189,47 @@ func (a *Agent) RetainEvidence(ctx context.Context, attempt, kind string, raw []
 	}
 	return final.ID, nil
 }
+
+// RestoreEvidence accepts only an exact artifact named in this Apply assignment.
+// The platform independently checks attempt/operation holds and current authority.
+func (a *Agent) RestoreEvidence(ctx context.Context, assignment runs.Assignment, kind string) ([]byte, error) {
+	if assignment.Kind != "apply" || assignment.Execution == nil || assignment.Execution.RetainedPlan == nil {
+		return nil, ErrAgent
+	}
+	var ref *runs.RetainedArtifact
+	for i, r := range assignment.Execution.RetainedPlan.Records {
+		if r.Kind == kind {
+			if ref != nil {
+				return nil, ErrAgent
+			}
+			ref = &assignment.Execution.RetainedPlan.Records[i]
+		}
+	}
+	if ref == nil || !catalog.UUID(ref.ID) || !runs.ValidDigest(ref.Hash) || ref.Size < 0 || ref.Size > evidence.Limit(kind) {
+		return nil, ErrAgent
+	}
+	req, e := http.NewRequestWithContext(ctx, "GET", a.Origin+"/worker/v1/attempts/"+assignment.AttemptID+"/artifacts/"+ref.ID, nil)
+	if e != nil {
+		return nil, ErrAgent
+	}
+	req.Header.Set("Authorization", "Bearer "+a.Token)
+	req.Header.Set("X-Worker-ID", a.Identity.WorkerID)
+	req.Header.Set("X-Worker-Generation", strconv.FormatInt(a.Identity.Generation, 10))
+	req.Header.Set("X-Agent-Instance", a.Identity.Agent)
+	client := *a.HTTP
+	client.Timeout = 30 * time.Second
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	res, e := client.Do(req)
+	if e != nil {
+		return nil, e
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		return nil, ErrAgent
+	}
+	raw, e := io.ReadAll(io.LimitReader(res.Body, ref.Size+1))
+	if e != nil || int64(len(raw)) != ref.Size || hash(raw) != ref.Hash {
+		return nil, ErrAgent
+	}
+	return raw, nil
+}

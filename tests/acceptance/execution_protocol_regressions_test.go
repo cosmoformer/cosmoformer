@@ -136,6 +136,32 @@ func TestExecutionAttentionReadFailureRollsBackCommandFacts(t *testing.T) {
 	f.workerCall(t, path, message, 200)
 }
 
+func TestExecutionPermissionBudgetClockFailureCommitsFence(t *testing.T) {
+	f := newExecutionFixture(t)
+	f.stoppedInit(t)
+	seal := f.seal(t, []runs.Provider{}, nil)
+	message := f.message(f.request(t, 2, "schema", seal.Digest))
+	path := "/attempts/" + f.assignment.AttemptID + "/start-permission"
+	// Schema needs no source observation: the first two reads are the initial
+	// clock check and the gated clock check; the third reads the attempt budget.
+	f.ticks.mu.Lock()
+	f.ticks.failAfter = 3
+	f.ticks.mu.Unlock()
+	expectWorkerCode(t, f.workerCall(t, path, message, 409), "CLOCK_UNRELIABLE")
+	var latched bool
+	var permissions, receipts int
+	err := f.db.Owner.QueryRow(context.Background(), `SELECT clock_unreliable,(SELECT count(*) FROM cosmoformer.start_permissions WHERE attempt_id=$1 AND ordinal=2),(SELECT count(*) FROM cosmoformer.attempt_messages WHERE attempt_id=$1 AND sequence=$2) FROM cosmoformer.installation`, f.assignment.AttemptID, message.Seq).Scan(&latched, &permissions, &receipts)
+	if err != nil || !latched || permissions != 0 || receipts != 0 {
+		t.Fatal("denied budget read lost its durable clock fence", latched, permissions, receipts, err)
+	}
+	// The injected source recovers immediately, but durable validation is still
+	// required. A healthy subsequent read must not clear the installation latch.
+	expectWorkerCode(t, f.workerCall(t, path, message, 409), "STALE_AGENT")
+	if err = f.db.Owner.QueryRow(context.Background(), `SELECT count(*) FROM cosmoformer.start_permissions WHERE attempt_id=$1 AND ordinal=2`, f.assignment.AttemptID).Scan(&permissions); err != nil || permissions != 0 {
+		t.Fatal("recovered clock issued authority without validation", permissions, err)
+	}
+}
+
 func TestExecutionPRObservationCannotReviveOldAuthority(t *testing.T) {
 	for _, scenario := range []string{"retargeted", "closed", "unchanged"} {
 		t.Run(scenario, func(t *testing.T) {

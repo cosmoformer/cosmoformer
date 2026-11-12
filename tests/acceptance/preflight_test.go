@@ -30,14 +30,21 @@ import (
 )
 
 type testClock struct {
-	mu    sync.Mutex
-	tick  time.Duration
-	start time.Time
+	mu        sync.Mutex
+	tick      time.Duration
+	start     time.Time
+	failAfter int
 }
 
 func (c *testClock) Now() (time.Duration, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.failAfter > 0 {
+		c.failAfter--
+		if c.failAfter == 0 {
+			return 0, errors.New("synthetic one-shot clock failure")
+		}
+	}
 	if !c.start.IsZero() {
 		return c.tick + time.Since(c.start), nil
 	}
@@ -131,6 +138,9 @@ func newPreflightFixtureForSource(t *testing.T, native coordinator.NativeEvidenc
 	return newPreflightFixtureForSourceClock(t, native, source, nil, requiredTags...)
 }
 func newPreflightFixtureForSourceClock(t *testing.T, native coordinator.NativeEvidenceVerifier, source map[string]any, ticks *testClock, requiredTags ...[]string) *preflightFixture {
+	return newPreflightFixtureForSourcePolicyClock(t, native, source, ticks, false, requiredTags...)
+}
+func newPreflightFixtureForSourcePolicyClock(t *testing.T, native coordinator.NativeEvidenceVerifier, source map[string]any, ticks *testClock, allowPR bool, requiredTags ...[]string) *preflightFixture {
 	t.Helper()
 	if ticks == nil {
 		ticks = &testClock{tick: time.Second}
@@ -169,7 +179,7 @@ func newPreflightFixtureForSourceClock(t *testing.T, native coordinator.NativeEv
 	actor := session["actor"].(map[string]any)["id"].(string)
 	admin.call("POST", base+"/teams/"+team+"/members", map[string]any{"account_id": actor}, 200)
 	admin.call("POST", base+"/grants", map[string]any{"team_id": team, "project_id": project, "environment_id": env, "role": "planner"}, 200)
-	declaration := catalog.Stack{ID: runs.ID(), Name: "Local fixture", ProjectID: project, EnvironmentID: env, Root: ".", TrackedBranch: "main", Engine: catalog.Engine{Name: "opentofu", Version: "1.13.8"}, Workspace: "default", BackendOwnerAccountID: "111122223333", BackendFiles: []string{}, VarFiles: []string{}, Worker: catalog.Pool{ID: pool, Tags: []string{}}, Secrets: []catalog.Secret{}, Approvals: catalog.Approvals{Minimum: 1}, ChangePaths: []string{}, DependsOn: []string{}}
+	declaration := catalog.Stack{AllowPRApply: allowPR, ID: runs.ID(), Name: "Local fixture", ProjectID: project, EnvironmentID: env, Root: ".", TrackedBranch: "main", Engine: catalog.Engine{Name: "opentofu", Version: "1.13.8"}, Workspace: "default", BackendOwnerAccountID: "111122223333", BackendFiles: []string{}, VarFiles: []string{}, Worker: catalog.Pool{ID: pool, Tags: []string{}}, Secrets: []catalog.Secret{}, Approvals: catalog.Approvals{Minimum: 1}, ChangePaths: []string{}, DependsOn: []string{}}
 	if len(requiredTags) > 0 {
 		declaration.Worker.Tags = requiredTags[0]
 	}

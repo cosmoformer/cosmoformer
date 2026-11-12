@@ -115,7 +115,11 @@ func (c *Coordinator) commandEvent(ctx context.Context, tx pgx.Tx, a runs.Assign
 		}
 		_, e = tx.Exec(ctx, `UPDATE cosmoformer.start_permissions SET status='stopped',stop_facts=$2,event_digest=decode($3,'hex'),stopped_at=clock_timestamp(),revision=revision+1 WHERE id=$1`, p.Permission, mustJSON(p), runs.Digest(p))
 		okay := p.Exit != nil && (*p.Exit == 0 || command == "plan" && *p.Exit == 2)
-		if okay && p.Ordinal < 4 {
+		limit := int64(4)
+		if a.Kind == "apply" {
+			limit = 2
+		}
+		if okay && p.Ordinal < limit {
 			out.AttemptState = "ready"
 			out.Ready = true
 			out.NextCommandOrdinal = int(p.Ordinal + 1)
@@ -233,9 +237,26 @@ func (c *Coordinator) executionResult(ctx context.Context, tx pgx.Tx, a runs.Ass
 	if p.Outcome == "cancelled" && !cancelled {
 		return false, runs.Fail("CANCEL_EVIDENCE_REQUIRED")
 	}
-	if p.Outcome == "success" && !cancelled {
+	if p.Outcome == "success" && !cancelled && a.Kind == "plan" {
 		if e = c.finalizePlan(ctx, tx, a, m, p, planning); e != nil {
 			return false, e
+		}
+	}
+	if p.Outcome == "success" && a.Kind == "apply" {
+		if len(p.Commands) != 2 || sealed == "" || a.Execution.RetainedPlan == nil || sealed != a.Execution.RetainedPlan.ManifestDigest {
+			return false, runs.Fail("RESULT_IDENTITY_MISMATCH")
+		}
+		var attestations bool
+		if e = tx.QueryRow(ctx, `SELECT pre_init_spec_artifact_id=ANY($2::uuid[]) AND sealed_manifest_artifact_id=ANY($2::uuid[]) AND (provider_lock_artifact_id IS NULL OR provider_lock_artifact_id=ANY($2::uuid[])) FROM cosmoformer.attempts WHERE id=$1`, m.AttemptID, p.Artifacts).Scan(&attestations); e != nil {
+			return false, e
+		}
+		if !attestations {
+			return false, runs.Fail("EVIDENCE_REQUIRED")
+		}
+		for _, r := range p.Commands {
+			if r.Status != "stopped" || r.Exit == nil || *r.Exit != 0 {
+				return false, runs.Fail("COMMAND_FAILED")
+			}
 		}
 	}
 	if e = c.executionLogFinal(ctx, tx, m.AttemptID, p.LogFinal); e != nil {
@@ -274,9 +295,12 @@ func (c *Coordinator) executionResult(ctx context.Context, tx pgx.Tx, a runs.Ass
 	}
 	reason := "EXECUTION_FAILED"
 	if outcome == "success" {
-		reason = "PLAN_READY"
-		if !planning.Analysis.Changes.HasChanges() {
-			reason = "NO_CHANGES"
+		reason = "APPLY_SUCCEEDED"
+		if a.Kind == "plan" {
+			reason = "PLAN_READY"
+			if !planning.Analysis.Changes.HasChanges() {
+				reason = "NO_CHANGES"
+			}
 		}
 	}
 	if outcome == "preparation_failed" {
@@ -304,6 +328,12 @@ func (c *Coordinator) executionResult(ctx context.Context, tx pgx.Tx, a runs.Ass
 	}
 	out.AttemptState = "terminal"
 	out.OperationStatus = "failed"
+	if outcome == "not_executed" && a.Kind == "apply" {
+		out.OperationStatus = "retired"
+		if _, e = tx.Exec(ctx, `UPDATE cosmoformer.operations SET retired_at=clock_timestamp() WHERE id=$1`, a.OperationID); e != nil {
+			return false, e
+		}
+	}
 	if outcome == "success" {
 		out.OperationStatus = "succeeded"
 	}

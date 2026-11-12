@@ -102,18 +102,18 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { retu
 
 func TestInvalidAuthorityFailsBeforeAWS(t *testing.T) {
 	cases := map[string]func(*fixture){
-		"source only":            func(f *fixture) { f.a.Phase = "preflight" },
-		"apply remains disabled": func(f *fixture) { f.a.Kind = "apply" },
-		"no spec":                func(f *fixture) { f.a.Execution = nil },
-		"untrusted digest":       func(f *fixture) { f.a.Digest = strings.Repeat("a", 64) },
-		"missing platform":       func(f *fixture) { f.a.Platform = "" },
-		"missing agent":          func(f *fixture) { f.worker.Agent = "" },
-		"expired attempt":        func(f *fixture) { f.a.RemainingMS = 0 },
-		"incompatible cap":       func(f *fixture) { f.a.CapSeconds = 3600 },
-		"remaining exceeds cap":  func(f *fixture) { f.a.RemainingMS = f.a.CapSeconds*1000 + 1 },
-		"missing registry":       func(f *fixture) { f.registry = nil },
-		"wrong runtime":          func(f *fixture) { f.a.RuntimeID = runs.ID() },
-		"wrong role account":     func(f *fixture) { f.a.Execution.AWS.Account = "111122223333" },
+		"source only":                         func(f *fixture) { f.a.Phase = "preflight" },
+		"apply lacks exact retained evidence": func(f *fixture) { f.a.Kind = "apply" },
+		"no spec":                             func(f *fixture) { f.a.Execution = nil },
+		"untrusted digest":                    func(f *fixture) { f.a.Digest = strings.Repeat("a", 64) },
+		"missing platform":                    func(f *fixture) { f.a.Platform = "" },
+		"missing agent":                       func(f *fixture) { f.worker.Agent = "" },
+		"expired attempt":                     func(f *fixture) { f.a.RemainingMS = 0 },
+		"incompatible cap":                    func(f *fixture) { f.a.CapSeconds = 3600 },
+		"remaining exceeds cap":               func(f *fixture) { f.a.RemainingMS = f.a.CapSeconds*1000 + 1 },
+		"missing registry":                    func(f *fixture) { f.registry = nil },
+		"wrong runtime":                       func(f *fixture) { f.a.RuntimeID = runs.ID() },
+		"wrong role account":                  func(f *fixture) { f.a.Execution.AWS.Account = "111122223333" },
 		"wrong role partition": func(f *fixture) {
 			f.a.Execution.AWS.RoleARN = strings.Replace(executionARN, "arn:aws:", "arn:aws-cn:", 1)
 		},
@@ -232,5 +232,33 @@ func TestAssignedAuthorityIsCopiedBeforePreparation(t *testing.T) {
 	}
 	if f.request.Get("RoleArn") != executionARN || !strings.Contains(f.request.Get("Policy"), "777788889999") || strings.Contains(f.request.Get("Policy"), "another-state-bucket") {
 		t.Fatal("assignment mutation retargeted credentials")
+	}
+}
+
+func TestSavedPlanApplyUsesTheSameFixedOwnerSession(t *testing.T) {
+	f := newFixture(t)
+	p := &runs.RetainedPlan{ID: runs.ID(), Revision: 2, ManifestDigest: strings.Repeat("a", 64), Artifacts: []string{}, Records: []runs.RetainedArtifact{}}
+	for _, kind := range []string{"pre_init_spec", "manifest", "binary_plan", "raw_plan_json", "provider_schema", "normalized_changes", "findings"} {
+		id := runs.ID()
+		p.Artifacts = append(p.Artifacts, id)
+		p.Records = append(p.Records, runs.RetainedArtifact{ID: id, Kind: kind, Hash: p.ManifestDigest, Size: 1, Version: "synthetic-exact-version"})
+	}
+	f.a.Kind = "apply"
+	f.a.Execution.RetainedPlan = p
+	f.a.Digest = runs.Digest(f.a.Execution)
+	f.a.CapSeconds = 2400
+	f.a.RemainingMS = 2400000
+	a, e := f.access()
+	if e != nil {
+		t.Fatal("complete Apply assignment rejected", e)
+	}
+	prepare(t, a)
+	binding := a.binding
+	env, e := a.Environment(context.Background(), binding)
+	if e != nil || len(env) == 0 || f.assumeCount.Load() != 1 || f.headCount.Load() != 2 || f.request.Get("Policy") != a.policy || f.request.Get("DurationSeconds") != "3600" {
+		t.Fatal("Apply did not use the fixed checked session", e)
+	}
+	if e = a.Prepare(context.Background()); e == nil || f.assumeCount.Load() != 1 {
+		t.Fatal("Apply renewed its session")
 	}
 }
