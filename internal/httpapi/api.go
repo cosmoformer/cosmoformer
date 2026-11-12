@@ -88,6 +88,8 @@ func NewWithOptions(s *store.Store, origin string, options Options) (http.Handle
 	server.registerBrowser(api)
 	server.registerAdmin(api)
 	server.registerConfiguration(api)
+	server.registerModules(api)
+	server.registerDependencies(api)
 	server.registerPreflights(api)
 	server.registerPlanningReads(api)
 	server.registerApprovals(api)

@@ -430,6 +430,9 @@ func (a *Server) importInventory(ctx context.Context, tx pgx.Tx, org, repo strin
 	if _, e = tx.Exec(ctx, `UPDATE cosmoformer.stacks SET archived=true,revision=revision+1 WHERE repository_id=$1 AND NOT (declaration_id=ANY($2::uuid[])) AND NOT archived`, repo, ids); e != nil {
 		return nil, e
 	}
+	if e = syncDependencies(ctx, tx, manifest, out.Body.StackIDs); e != nil {
+		return nil, e
+	}
 	if _, e = tx.Exec(ctx, `UPDATE cosmoformer.repositories SET inventory_commit=$2,revision=$3 WHERE id=$1`, repo, facts.Commit, facts.InventoryRevision); e != nil {
 		return nil, e
 	}
