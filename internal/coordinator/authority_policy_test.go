@@ -25,7 +25,7 @@ func authorityFixture(t *testing.T) (runs.Assignment, []policyRow) {
 	}
 	// Storage response shapes include the ordinary preflight authority, exact
 	// execution metadata, current automation scope, credentials and binding.
-	rows := []policyRow{row(true), row("", project, env, repo, true, "plan"), row(true), row(true), row(true), row(int64(1), s.Source.Commit)}
+	rows := []policyRow{row(true), row(false), row("", project, env, repo, true, "plan"), row(true), row(true), row(true), row(int64(1), s.Source.Commit)}
 	for range s.Grants {
 		rows = append(rows, row(true))
 	}
@@ -72,7 +72,7 @@ func TestAuthorityRejectsChangedGrantMetadataWorkerAndBindingFacts(t *testing.T)
 		}
 		t.Run(string(rune('A'+i)), func(t *testing.T) {
 			answers := append([]policyRow{}, rows...)
-			answers[i] = row(false)
+			answers[i] = row(!answer.values[0].(bool))
 			tx := &policyTx{rows: answers}
 			if e := policyCoordinator().executionAuthority(context.Background(), tx, a); e == nil {
 				t.Fatal("changed current fact retained launch authority")

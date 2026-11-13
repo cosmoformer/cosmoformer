@@ -81,7 +81,12 @@ if (env.COSMOFORMER_TEST_OWNER_DSN !== 'dsn:' + id || env.COSMOFORMER_TEST_MARKE
 if (env.SCENARIO === 'test-failure') process.exit(7);
 if (env.SCENARIO === 'test-wait') {
     let heartbeat = 0;
-    const timer = setInterval(() => { fs.writeFileSync('calls/' + id + '.heartbeat', String(++heartbeat)); if (fs.existsSync('calls/' + id + '.release')) { clearInterval(timer); } }, 20);
+    const timer = setInterval(() => {
+        const file = 'calls/' + id + '.heartbeat';
+        fs.writeFileSync(file + '.tmp', String(++heartbeat));
+        fs.renameSync(file + '.tmp', file);
+        if (fs.existsSync('calls/' + id + '.release')) { clearInterval(timer); }
+    }, 20);
 }
 `);
     chmodSync(go, 0o755);
@@ -283,8 +288,13 @@ for (const exitedLeader of [false, true]) test(`fixture cleanup stops signal-ign
     if (!exitedLeader) assert.equal((await item.done).signal, 'SIGKILL');
     const heartbeat = path.join(sibling.dir, 'calls', otherID + '.heartbeat');
     const before = Number(readFileSync(heartbeat, 'utf8'));
-    for (let i = 0; i < 100 && Number(readFileSync(heartbeat, 'utf8')) <= before; i++) await pause();
-    assert.ok(Number(readFileSync(heartbeat, 'utf8')) > before, 'unrelated child must keep doing work');
+    let observed = before;
+    for (let i = 0; i < 100 && observed <= before; i++) {
+        await pause();
+        observed = Number(readFileSync(heartbeat, 'utf8'));
+    }
+    assert.ok(Number.isSafeInteger(before) && before > 0);
+    assert.ok(Number.isSafeInteger(observed) && observed > before, 'unrelated child must keep doing work');
     writeFileSync(path.join(sibling.dir, 'calls', otherID + '.release'), 'release');
     assert.equal((await other.done).code, 0, other.output);
     sibling.assertClean([otherID]);

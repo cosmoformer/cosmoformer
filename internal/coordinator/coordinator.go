@@ -434,6 +434,13 @@ func (c *Coordinator) remaining(ctx context.Context, tx pgx.Tx, a *runs.Assignme
 	return nil
 }
 func (c *Coordinator) authority(ctx context.Context, tx pgx.Tx, operation string, s runs.PreflightSpec) error {
+	var blocked bool
+	if e := tx.QueryRow(ctx, `SELECT cosmoformer.artifact_start_blocked(stack_id) FROM cosmoformer.operations WHERE id=$1`, operation).Scan(&blocked); e != nil {
+		return e
+	}
+	if blocked {
+		return runs.Fail("EVIDENCE_UNAVAILABLE")
+	}
 	if s.Recovery != nil {
 		var valid bool
 		if e := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM cosmoformer.operations o JOIN cosmoformer.recovery_cases r ON r.id=o.recovery_case_id WHERE o.id=$1 AND r.id=$2 AND o.stack_id=r.stack_id AND o.recovery_evidence_revision=$3 AND r.evidence_revision=$3 AND r.status='open' AND r.stop_verified)`, operation, s.Recovery.Case, s.Recovery.Revision).Scan(&valid); e != nil {

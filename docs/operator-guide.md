@@ -1,4 +1,4 @@
-# Local planning, saved-plan Apply and recovery
+# Local planning, saved-plan Apply, recovery and retention
 
 This guide covers implemented accounts, source checks, verified PR/tracked-branch and explicit native planning, exact-plan approvals, saved-plan Apply, execution controls, formal recovery, evidence custody and process ownership. Native planning requires an assessed compatible stack and current execution gates. Actual company compatibility remains `not_assessed`. There is no production release; company adoption and deployment packaging remain later work.
 
@@ -12,7 +12,7 @@ make check
 make test-db-stop
 ```
 
-`test-unit` includes Go race checks and static checks. The serial host integration/coverage runs allow 30 minutes for the expanded acceptance suite; CI still selects the complete, disjoint inventory across four bounded shards. `test-integration` runs against generated, marker-verified PostgreSQL databases using the real restricted runtime role. It covers tenant isolation, version-4/5/8 forward migrations through version 15, permanent ownership races, source fencing, encryption quotas, OAuth session binding, single-flight refresh, signed webhook deduplication and the local worker API journey. Source journeys replace external Git I/O; planning journeys additionally inject native/AWS I/O; the separate Linux suite exercises actual Git and process handling.
+`test-unit` includes Go race checks and static checks. The serial host integration/coverage runs allow 30 minutes for the expanded acceptance suite; CI still selects the complete, disjoint inventory across four bounded shards. `test-integration` runs against generated, marker-verified PostgreSQL databases using the real restricted runtime role. It covers tenant isolation, version-4/5/8 forward migrations through version 16, permanent ownership races, source fencing, encryption quotas, OAuth session binding, single-flight refresh, signed webhook deduplication and the local worker API journey. Source journeys replace external Git I/O; planning journeys additionally inject native/AWS I/O; the separate Linux suite exercises actual Git and process handling.
 
 `test-source` builds the pinned Linux image, verifies its native executable and Git package identity and runs loopback-only Git HTTPS tests with `--network none`. It mounts no database DSN, cloud credential, home directory or Docker socket. Downloads occur during the explicit build, with pinned base images, signed Debian snapshot metadata and exact archive checksums. Native runtime identity checks use the baked executable; supervisor checks use synthetic subprocess fixtures. Passing this suite does not approve an S3/DynamoDB backend profile or an AWS provider version for execution.
 
@@ -32,7 +32,7 @@ Holds reference an existing same-tenant plan, accepted operation, attempt, or re
 
 Migration 008 advances the runtime to schema version 8. It preserves migrations 001–007 and adds immutable execution assignment snapshots, preparation/credential deadlines, provider-lock attestation links, producing-command artifact ordinals and exact spawn/stop facts. Readiness checks require the new integrity triggers. Narrow tenant-checked helpers validate only an attempt's own binding, observe the authority clock and place contradictory execution facts under attention; the runtime still cannot list or mutate global backend targets directly. Migration and serving remain separate commands.
 
-Migration 009 preserves migrations 001–008 and alters all existing SECURITY DEFINER helpers in place to use `pg_catalog, cosmoformer, pg_temp`. Explicitly putting temporary relations last prevents runtime-owned temporary tables from replacing trusted application tables in helper lookups. Function identities, bodies and grants remain unchanged. Serving requires schema version 15 and rejects any definer helper with a different owner or search path. Run the explicit owner migration before restarting the runtime; serving does not repair database configuration. Regression checks cover durable encryption accounting with colliding temporary tables, cold/cached calls, unsafe configuration rejection, and version-8 upgrade of an already-open connection. This validation uses dummy data and ordinary tables, with no privilege-escalation payload or live database probe.
+Migration 009 preserves migrations 001–008 and alters all existing SECURITY DEFINER helpers in place to use `pg_catalog, cosmoformer, pg_temp`. Explicitly putting temporary relations last prevents runtime-owned temporary tables from replacing trusted application tables in helper lookups. Function identities, bodies and grants remain unchanged. Serving requires schema version 16 and rejects any definer helper with a different owner or search path. Run the explicit owner migration before restarting the runtime; serving does not repair database configuration. Regression checks cover durable encryption accounting with colliding temporary tables, cold/cached calls, unsafe configuration rejection, and version-8 upgrade of an already-open connection. This validation uses dummy data and ordinary tables, with no privilege-escalation payload or live database probe.
 
 Migration 006 refuses a database containing version-5 artifacts or backup sets with `EVIDENCE_METADATA_RECONCILIATION_REQUIRED`. Version 5 lacks bucket and installation capture metadata; neither can be safely inferred. The migration visits each tenant under FORCE RLS and fails transactionally without advancing the version. Preserve the database and reconcile verified metadata through a separately reviewed migration before retrying; do not delete evidence to bypass this guard. Databases containing account/source/preflight/binding records without these legacy evidence rows upgrade directly. No backup capture or evidence deletion occurs during migration.
 
@@ -410,7 +410,7 @@ GET `/organizations/{org}/stacks/{id}/dependencies` identifies the accepted stac
 
 ## Operator maintenance and restoration (milestone 13)
 
-Schema **15** adds host operation evidence, an offline latch, rotation receipts and exact backup manifests. Migrations **001–014 remain unchanged**. These workflows use the existing coordination gate, encryption ledger, FORCE RLS, artifact holds, backend namespace claims and recovery cases. They do not operate a backup service, provision infrastructure, rotate upstream credentials or run retention schedules. Company compatibility remains **`not_assessed`**. Cleanup scheduling, deployment packaging and company adoption remain milestones 14, 15 and 16.
+Schema **15** adds host operation evidence, an offline latch, rotation receipts and exact backup manifests. Migrations **001–014 remain unchanged**. These workflows use the existing coordination gate, encryption ledger, FORCE RLS, artifact holds, backend namespace claims and recovery cases. They do not operate a backup service, provision infrastructure or rotate upstream credentials. Company compatibility remains **`not_assessed`**. Schema 16 adds artifact cleanup as described below; deployment packaging and company adoption remain milestones 15 and 16.
 
 ### Authority, maintenance and independent stop evidence
 
@@ -509,7 +509,7 @@ cosmoformer backup-hold release --backup-id <backup-UUID> \
   --evidence-file /operator/custody/retention-checks.json
 ```
 
-The evidence must include `"retention_checked": true` and current stop evidence. Independently verify that the selected database backup/WAL recovery points and copies no longer require those artifacts or keys, including legal/operator retention requirements. Release changes only that selected backup's active holds; it neither deletes artifacts nor releases another owner's protection. Inspect remains available afterward. No retention schedule runs in this milestone.
+The evidence must include `"retention_checked": true` and current stop evidence. Independently verify that the selected database backup/WAL recovery points and copies no longer require those artifacts or keys, including legal/operator retention requirements. Release changes only that selected backup's active holds; it neither deletes artifacts nor releases another owner's protection. Inspect remains available afterward. Backup-hold release does not itself run cleanup; artifact retention uses the separately configured or explicit cleanup action below.
 
 ### Replaceable PostgreSQL base-backup/WAL reference
 
@@ -613,3 +613,121 @@ Frontend type checks, the production build, all 245 frontend tests and all 48 Ch
 The restore/replay, key-accounting and maintenance-gate review corrected four issues: unfinished keys from restored history could previously become write keys again after the first fresh rotation; runtime readiness accepted a privileged login masked by an application-role override; clock-skewed finalization timestamps could exclude existing versions from backup protection; and a 4,096-slot reservation could cross 90% before the status warning appeared. Restored keys now stay permanently retired, runtime login and role must both be the application identity, backup membership follows the frozen database snapshot, and the warning precedes the threshold by a full quota block. Migrations 001–014 remain unchanged.
 
 Review validation passed: Go race/unit checks and vet (including integration-tag vet), full store/coordinator/API PostgreSQL integration packages, focused approval/execution/recovery gate and replay acceptance checks, owner/CLI and forward-upgrade regressions, and the standalone actual PostgreSQL dump/restore exercise with historical unfinished keys. Frontend and native execution code were unchanged in this review; their earlier milestone verification remains the baseline. This was a focused review of these operator boundaries, not a comprehensive repository security audit. External stop, inventory and new-key-history assertions remain operator responsibilities; physical WAL/PITR recovery remains untested.
+
+## Artifact retention and cleanup (milestone 14)
+
+Cleanup is disabled by default. Before enabling it, test **backup-hold capture,
+backup restoration, key recovery and exact artifact-version restoration together**
+using isolated fixtures. Cleanup cannot discover undeclared external backups.
+Company compatibility remains `not_assessed`; deployment packaging and company
+adoption remain milestones 15 and 16.
+
+The host settings use the usual `COSMOFORMER_` prefix:
+
+| Setting | Default | Allowed value |
+| --- | --- | --- |
+| `CLEANUP_ENABLED` | `false` | `true` or `false` |
+| `CLEANUP_INTERVAL_SECONDS` | `86400` | 3600–315360000 seconds |
+| `TERMINAL_RETENTION_DAYS` | `30` | 30–365000 days |
+| `CLEANUP_BATCH` | `100` | 1–100 artifacts |
+
+Changes require restarting the platform. The interval and retention upper bounds
+prevent duration/interval overflow. Enabling requires configured artifact storage.
+Automatic cleanup runs one sequential batch per interval, with a 20-second total
+budget and at most 100 tenant visits. A rotating tenant cursor avoids permanently
+excluding organizations without enabled repositories. Manual cleanup also has a
+20-second total budget and never selects more than the configured batch. A timeout
+can leave claims pending; it does not authorize a different version or prove that
+storage deletion failed. Automatic retry requires cleanup enabled; a bounded manual
+action works while automatic cleanup is disabled.
+
+Installation administrators can open **Retention & cleanup** to view safe effective
+settings, preview the selected organization and explicitly run a bounded action.
+The corresponding routes are `GET /api/v1/admin/settings`,
+`GET /api/v1/admin/cleanup-preview?org_id=<uuid>` and
+`POST /api/v1/admin/cleanup` with `{ "org_id": "<uuid>", "limit": 100 }`.
+Use the normal browser session, CSRF and idempotency headers. Settings are read-only.
+Preview supports `outcome`, `limit` (default 50, maximum 100) and the returned
+`next_cursor`. Filtering happens before pagination. It does not release/repair
+holds or claim/delete objects. The cleanup action returns its fixed `claim_ids`;
+refresh preview for current outcomes. Replaying the same mutation key selects the
+same claims and still requires current installation-administrator authority. Replays
+process only pending claims up to the current batch bound, even if the original
+receipt was accepted with a larger setting; completed claims do not consume that bound.
+Requests and per-artifact claims/outcomes are audited without raw evidence,
+credentials, object keys or bucket details in browser responses.
+
+Usable ready plans, assembling plans with live attempts, live operations, unresolved
+attempts, open recovery and declared backups protect their evidence independently.
+Cleanup checks these references even if their hold rows are missing. A finalized
+artifact must have a closed owning attempt and terminal owning operation; retention
+is measured from the later of attempt closure and operation termination. An
+incomplete/orphan upload uses its closed owning attempt's age, and still requires
+a terminal owning operation and no remaining uses. Age never proves execution
+stopped, clears recovery, or releases process/backend reservations. Expired or
+invalidated plan holds can be released when no longer required; independent
+operation, attempt, recovery and backup protection remains. Historical terminal
+operations receive a conservative retention start at the schema-16 upgrade time.
+
+Each execution reconciles at most the batch bound of missing holds, persistent
+attention facts and obsolete non-backup holds separately, under the shared
+coordination gate. A preview can therefore show an obsolete hold as protected
+until reconciliation releases it. An unresolved upload with no trustworthy exact
+version remains `unresolved`; use the existing upload custody/receipt workflow to
+establish identity. Cleanup never lists a bucket to guess its version.
+
+Claims atomically bind the artifact's immutable bucket/key/version and mark it
+`deleting` under the gate. New approval, Apply and recovery evidence use cannot
+acquire a claimed version. Storage checks and deletion run outside transactions,
+using only the platform storage adapter and its expected-owner fence. The existing
+platform role must permit `s3:DeleteObjectVersion` for the artifact namespace;
+insufficient permission remains a retryable failed claim. Cleanup never borrows
+worker or execution-role credentials. The first
+attempt checks the exact version before durably recording delete intent. A known
+orphan version can be deleted without guessing absent size metadata; known sizes
+are still checked. Claim state, required references and persistent attention are
+rechecked under the gate after storage preflight, immediately before admission. If the
+version was already missing, the claim records `MISSING_VERSION`, the artifact
+becomes unavailable, and its tombstone says `unexpected_missing_version`; this is
+not reported as a completed deletion. After durable intent, lost responses or a
+restart repeat only that exact version's idempotent deletion. Confirmed completion
+records a permanent `exact_version_deleted` tombstone. Completed replays do no
+storage I/O. Transient failures remain `failed`/`deleting`, retryable after five
+minutes with the same claim; a replay of the original explicit action may retry
+that fixed claim sooner. No latest-version fallback or broad bucket deletion exists. A preserved legacy
+claim whose artifact is not `deleting` records `CLAIM_STATE_MISMATCH` and performs
+no storage I/O. Reconcile that metadata under operator control; do not delete first
+and hope the outcome can be committed. All custody reads/finalization reject a
+committed claim even if the artifact state has not yet been reconciled.
+
+Missing required ordinary holds can be repaired only before any deletion claim.
+A claimed/unavailable live reference records persistent
+`REQUIRED_EVIDENCE_PROTECTION_LOST` attention and blocks affected new starts.
+Cleanup pauses deletion of such an artifact. A missing declared-backup hold also
+requires attention: runtime code cannot repair or release protected backup
+metadata. A host owner must investigate exact versions, manifests, active references
+and audit history under verified offline maintenance. Do not remove a claim,
+change its identity, resurrect deleted evidence or clear attention merely to resume
+work. Establish a truthful unavailable-evidence/recovery disposition; only then may
+the owner explicitly resolve the attention fact. A fresh normal plan is required
+where earlier evidence is no longer usable. Claims, tombstones and custody history
+remain retained after reconciliation.
+
+Maintenance stops new batches and retries before storage admission. A delete
+already admitted can finish and record its outcome; maintenance is not proof that
+external I/O has stopped. Before backup capture or key rotation, stop the platform
+and cleanup process, verify no storage call remains in flight, and supply the
+existing independent stopped-writer/cleanup evidence. The offline latch fences late
+runtime writes. Backup capture refuses unresolved uploads, deleting artifacts and
+incomplete claims. If cleanup is interrupted, retain maintenance while inspecting
+the exact claim and storage outcome. To drain a retryable claim, first complete the
+normal maintenance-exit checks, resume the controlled platform without automatic
+cleanup, run an explicit bounded retry, and re-enter verified offline maintenance
+before capture. Never bypass capture's unresolved-claim guard. Unexpected missing
+versions are durably settled as unavailable, not silently inserted into a backup.
+Restore retains these guards and requires reconciliation before any resumed cleanup.
+
+This is artifact-object retention, not a database purge. Platform metadata, audit
+history, bindings, recovery records, backup manifests and backup custody records
+remain. Historical Changes/downloads report unavailable exact evidence; logs show
+archive gaps. Review never recreates past evidence from current inputs.

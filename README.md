@@ -16,7 +16,9 @@ The run workspace supports scoped Cancel, separately confirmed Force Stop and fo
 
 Schema version **15** adds host-only maintenance, atomic offline key rotation, exact backup holds, clock recovery and restore reconciliation. Restore revokes replay authority, requires a genuinely new write key and routes adopted backends through existing recovery. See the [operator maintenance and restoration guide](docs/operator-guide.md#operator-maintenance-and-restoration-milestone-13) and run `node scripts/operator-recovery.mjs` with the pinned Node toolchain for a synthetic, isolated PostgreSQL restore exercise. Migrations 001–014 remain unchanged.
 
-There is no production release. Scheduled cleanup and deployment packaging remain unfinished. Synthetic PostgreSQL/worker tests and the separate network-isolated native matrices do not establish live AWS/IAM or company compatibility. See the [planning behavior and boundaries](docs/operator-guide.md#native-planning).
+Schema version **16** adds safe artifact retention and cleanup while preserving migrations 001–015. Cleanup defaults to disabled; enabled daily scheduling and explicit administrator actions select at most 100 exact-version claims per bounded batch. Usable plans, live or uncertain attempts, recovery and declared backups remain protected. Failed claims retry their original version; completed deletion keeps a tombstone and historical evidence stays truthfully unavailable. Test backup protection and restoration before enabling cleanup. See [retention operations](docs/operator-guide.md#artifact-retention-and-cleanup-milestone-14).
+
+There is no production release. Deployment packaging and company adoption remain milestones 15 and 16. Synthetic PostgreSQL/worker tests and the separate network-isolated native matrices do not establish live AWS/IAM or company compatibility. See the [planning behavior and boundaries](docs/operator-guide.md#native-planning).
 
 ## Local development
 

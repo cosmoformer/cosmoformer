@@ -178,3 +178,20 @@ func spool(r io.Reader, size int64, digest string) (*os.File, error) {
 	ok = true
 	return f, nil
 }
+
+// Delete never creates a delete marker or addresses an unspecified version.
+func (s *S3) Delete(ctx context.Context, key, version string) error {
+	if key == "" || !validVersion(version) {
+		return ErrInvalid
+	}
+	out, e := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(s.settings.Bucket), ExpectedBucketOwner: aws.String(s.settings.Owner), Key: aws.String(key), VersionId: aws.String(version)})
+	if e != nil {
+		return ErrUnavailable
+	}
+	// A successful exact-version DELETE is idempotent. S3 may omit optional
+	// response version metadata; the request identity remains mandatory.
+	if got := aws.ToString(out.VersionId); got != "" && got != version || aws.ToBool(out.DeleteMarker) {
+		return ErrInvalid
+	}
+	return nil
+}

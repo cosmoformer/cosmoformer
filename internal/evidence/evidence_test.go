@@ -453,3 +453,60 @@ func TestJSONSecretLeafCapacityCountsDistinctTerms(t *testing.T) {
 		t.Fatal("canonical leaf missing")
 	}
 }
+
+func TestS3DeletionFencesExactOwnerKeyAndVersion(t *testing.T) {
+	calls := 0
+	responseVersion := "v/opaque+1"
+	marker := false
+	status := 204
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Method != "DELETE" || r.URL.Path != "/fixture/key/opaque" || r.URL.Query().Get("versionId") != "v/opaque+1" || r.Header.Get("X-Amz-Expected-Bucket-Owner") != "123456789012" {
+			t.Errorf("unsafe deletion: %s %s", r.Method, r.URL)
+		}
+		w.Header().Set("X-Amz-Version-Id", responseVersion)
+		if marker {
+			w.Header().Set("X-Amz-Delete-Marker", "true")
+		}
+		w.WriteHeader(status)
+	}))
+	defer srv.Close()
+	sdk := s3.NewFromConfig(aws.Config{Region: "eu-west-1", Credentials: credentials.NewStaticCredentialsProvider("synthetic", "synthetic", "")}, func(o *s3.Options) {
+		o.BaseEndpoint = aws.String(srv.URL)
+		o.UsePathStyle = true
+		o.RetryMaxAttempts = 1
+	})
+	st := &S3{sdk, Settings{"fixture", "eu-west-1", "123456789012"}}
+	ctx := context.Background()
+	for _, version := range []string{"", "null", strings.Repeat("x", 1025)} {
+		if st.Delete(ctx, "key/opaque", version) == nil {
+			t.Fatal("unsafe version accepted")
+		}
+	}
+	if calls != 0 {
+		t.Fatal("invalid deletion reached storage")
+	}
+	for range 2 {
+		if e := st.Delete(ctx, "key/opaque", "v/opaque+1"); e != nil {
+			t.Fatal(e)
+		}
+	}
+	responseVersion = ""
+	if e := st.Delete(ctx, "key/opaque", "v/opaque+1"); e != nil {
+		t.Fatal("successful exact-version retry without optional response metadata", e)
+	}
+	responseVersion = "different"
+	if st.Delete(ctx, "key/opaque", "v/opaque+1") == nil {
+		t.Fatal("wrong response version accepted")
+	}
+	responseVersion = "v/opaque+1"
+	marker = true
+	if st.Delete(ctx, "key/opaque", "v/opaque+1") == nil {
+		t.Fatal("delete marker accepted")
+	}
+	marker = false
+	status = 503
+	if st.Delete(ctx, "key/opaque", "v/opaque+1") == nil {
+		t.Fatal("storage failure accepted")
+	}
+}
