@@ -90,6 +90,13 @@ func TestVersionEightDefinerUpgrade(t *testing.T) {
 	db, c, fingerprint := quotaConnection(t)
 	// Restore the exact version-8 function setting without rewriting migrations.
 	sqlOK(t, db.Owner, `
+ DROP FUNCTION cosmoformer.operation_terminal_time() CASCADE;
+ DROP FUNCTION cosmoformer.cleanup_identity() CASCADE;
+ DROP FUNCTION cosmoformer.cleanup_reference_attention() CASCADE;
+ DROP FUNCTION cosmoformer.cleanup_eligible(uuid,bigint),cosmoformer.artifact_start_blocked(uuid),cosmoformer.required_artifact_holds(),cosmoformer.required_backup_holds(),cosmoformer.cleanup_tenants(uuid);
+ ALTER TABLE cosmoformer.operations DROP COLUMN terminal_at;
+ ALTER TABLE cosmoformer.artifacts DROP COLUMN cleanup_attention;
+ ALTER TABLE cosmoformer.cleanup_claims DROP COLUMN bucket,DROP COLUMN object_key,DROP COLUMN delete_intent_at,DROP COLUMN storage_attempts;
  DROP FUNCTION cosmoformer.operator_write_guard() CASCADE;
  DROP FUNCTION cosmoformer.current_ciphertext_guard() CASCADE;
  DROP TABLE cosmoformer.backup_artifacts,cosmoformer.key_rotations,cosmoformer.operator_events;
@@ -143,7 +150,7 @@ func TestVersionEightDefinerUpgrade(t *testing.T) {
 	snapshot := func() string {
 		t.Helper()
 		var value string
-		if err := db.Owner.QueryRow(context.Background(), `SELECT jsonb_agg(jsonb_build_array(p.oid,p.proowner,p.proacl,p.prosrc) ORDER BY p.oid)::text FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='cosmoformer' AND p.prosecdef AND p.proname NOT IN ('invalidate_runtime_plans','invalidate_epoch_plans','retire_queued_applies','apply_spawn_epoch','execution_clock_failed')`).Scan(&value); err != nil {
+		if err := db.Owner.QueryRow(context.Background(), `SELECT jsonb_agg(jsonb_build_array(p.oid,p.proowner,p.proacl,p.prosrc) ORDER BY p.oid)::text FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='cosmoformer' AND p.prosecdef AND p.proname NOT IN ('invalidate_runtime_plans','invalidate_epoch_plans','retire_queued_applies','apply_spawn_epoch','execution_clock_failed','required_backup_holds','cleanup_tenants')`).Scan(&value); err != nil {
 			t.Fatal(err)
 		}
 		return value

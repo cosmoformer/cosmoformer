@@ -121,3 +121,38 @@ func TestApplyBudget(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanupDefaultsAndBounds(t *testing.T) {
+	t.Setenv("COSMOFORMER_ORIGIN", "https://localhost:5173")
+	t.Setenv("COSMOFORMER_DATABASE_DSN_FILE", "protected.dsn")
+	for _, key := range []string{"CLEANUP_ENABLED", "CLEANUP_INTERVAL_SECONDS", "TERMINAL_RETENTION_DAYS", "CLEANUP_BATCH"} {
+		t.Setenv("COSMOFORMER_"+key, "")
+	}
+	c, e := Load()
+	if e != nil || c.Cleanup.Enabled || c.Cleanup.IntervalSeconds != 86400 || c.Cleanup.RetentionDays != 30 || c.Cleanup.Batch != 100 {
+		t.Fatal(c.Cleanup, e)
+	}
+	for key, value := range map[string]string{"CLEANUP_ENABLED": "yes", "CLEANUP_INTERVAL_SECONDS": "3599", "TERMINAL_RETENTION_DAYS": "29", "CLEANUP_BATCH": "0"} {
+		t.Run(key, func(t *testing.T) {
+			t.Setenv("COSMOFORMER_"+key, value)
+			if _, e := Load(); e == nil {
+				t.Fatal("invalid cleanup setting accepted")
+			}
+		})
+	}
+	t.Setenv("COSMOFORMER_CLEANUP_BATCH", "101")
+	if _, e := Load(); e == nil {
+		t.Fatal("oversized cleanup batch")
+	}
+	t.Setenv("COSMOFORMER_CLEANUP_BATCH", "1")
+	t.Setenv("COSMOFORMER_CLEANUP_ENABLED", "true")
+	if _, e := Load(); e == nil {
+		t.Fatal("cleanup enabled without storage")
+	}
+	t.Setenv("COSMOFORMER_ARTIFACT_BUCKET", "synthetic-artifacts")
+	t.Setenv("COSMOFORMER_ARTIFACT_REGION", "eu-west-1")
+	t.Setenv("COSMOFORMER_ARTIFACT_EXPECTED_OWNER", "123456789012")
+	if c, e = Load(); e != nil || !c.Cleanup.Enabled || c.Cleanup.Batch != 1 {
+		t.Fatal(c.Cleanup, e)
+	}
+}

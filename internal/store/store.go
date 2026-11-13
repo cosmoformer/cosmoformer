@@ -15,7 +15,7 @@ import (
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
-const SchemaVersion int32 = 15
+const SchemaVersion int32 = 16
 
 var ErrForbidden = errors.New("insufficient permission")
 var ErrNotFound = errors.New("not found")
@@ -114,6 +114,12 @@ func (s *Store) Ready(ctx context.Context) error {
 		return errors.New("database operator maintenance has incompatible protections")
 	}
 
+	if e = s.Pool.QueryRow(ctx, `SELECT
+ (SELECT count(*)=3 FROM pg_trigger WHERE tgname IN ('operation_terminal_time','cleanup_identity','cleanup_reference_attention') AND tgrelid IN ('cosmoformer.operations'::regclass,'cosmoformer.cleanup_claims'::regclass) AND tgenabled='O')
+ AND has_function_privilege(current_user,'cosmoformer.cleanup_eligible(uuid,bigint)','EXECUTE')
+ AND NOT has_table_privilege(current_user,'cosmoformer.backup_artifacts','SELECT,INSERT,UPDATE,DELETE')`).Scan(&safe); e != nil || !safe {
+		return errors.New("database retention has incompatible protections")
+	}
 	return nil
 }
 func MigrationNames() ([]string, error) { return fs.Glob(migrationFiles, "migrations/*.sql") }

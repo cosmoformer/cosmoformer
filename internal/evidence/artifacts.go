@@ -41,6 +41,7 @@ type Artifact struct {
 	Hash    string `json:"sha256"`
 	Size    int64  `json:"size"`
 	State   string `json:"status"`
+	claimed bool   `json:"-"`
 }
 type Custody struct {
 	Storage Storage
@@ -70,7 +71,7 @@ func lookup(ctx context.Context, tx pgx.Tx, field, id string, attempt ...string)
 		where += " AND attempt_id=$2"
 		args = append(args, attempt[0])
 	}
-	e := tx.QueryRow(ctx, `SELECT id::text,upload_id::text,attempt_id::text,kind,bucket,object_key,coalesce(version_id,''),encode(sha256,'hex'),byte_count,state FROM cosmoformer.artifacts WHERE `+where, args...).Scan(&a.ID, &a.Upload, &a.Attempt, &a.Kind, &a.Bucket, &a.Key, &a.Version, &a.Hash, &a.Size, &a.State)
+	e := tx.QueryRow(ctx, `SELECT id::text,upload_id::text,attempt_id::text,kind,bucket,object_key,coalesce(version_id,''),encode(sha256,'hex'),byte_count,state,EXISTS(SELECT FROM cosmoformer.cleanup_claims c WHERE c.artifact_id=artifacts.id) FROM cosmoformer.artifacts WHERE `+where, args...).Scan(&a.ID, &a.Upload, &a.Attempt, &a.Kind, &a.Bucket, &a.Key, &a.Version, &a.Hash, &a.Size, &a.State, &a.claimed)
 	return a, e
 }
 func (c *Custody) Upload(ctx context.Context, tx Transaction, attempt, upload, kind, hash string, size int64, r io.Reader) (Artifact, error) {
@@ -92,6 +93,9 @@ func (c *Custody) Upload(ctx context.Context, tx Transaction, attempt, upload, k
 		if e == nil {
 			if a.Attempt != attempt || a.Kind != kind || a.Hash != hash || a.Size != size {
 				return store.ErrConflict
+			}
+			if a.claimed {
+				return ErrUnavailable
 			}
 			if a.State == "uploading" && a.Version == "" {
 				return ErrUploadIncomplete
@@ -167,7 +171,7 @@ func (c *Custody) Finalize(ctx context.Context, tx Transaction, attempt, upload,
 		if a.Attempt != attempt || a.Kind != kind || a.Hash != hash || a.Size != size {
 			return store.ErrConflict
 		}
-		if a.State != "uploading" && a.State != "finalized" {
+		if a.claimed || a.State != "uploading" && a.State != "finalized" {
 			return ErrUnavailable
 		}
 		return nil
@@ -206,6 +210,9 @@ func (c *Custody) Finalize(ctx context.Context, tx Transaction, attempt, upload,
 		current, e := lookup(ctx, q, "id", a.ID)
 		if e != nil {
 			return e
+		}
+		if current.claimed {
+			return ErrUnavailable
 		}
 		if current.State == "finalized" {
 			a = current
@@ -267,7 +274,7 @@ func (c *Custody) Read(ctx context.Context, tx Transaction, id string) (Artifact
 		if e != nil {
 			return e
 		}
-		if a.State != "finalized" {
+		if a.claimed || a.State != "finalized" {
 			return ErrUnavailable
 		}
 		return nil
@@ -285,7 +292,7 @@ func (c *Custody) Read(ctx context.Context, tx Transaction, id string) (Artifact
 	// Recheck current permissions after external I/O and before releasing bytes.
 	e = tx(func(q pgx.Tx) error {
 		v, e := lookup(ctx, q, "id", id)
-		if e == nil && v.State != "finalized" {
+		if e == nil && (v.claimed || v.State != "finalized") {
 			return ErrUnavailable
 		}
 		return e

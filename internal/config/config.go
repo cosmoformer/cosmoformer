@@ -15,12 +15,20 @@ import (
 type Config struct {
 	Listen, Origin, DSNFile, UnixSocket                       string
 	Artifact                                                  evidence.Settings
+	Cleanup                                                   evidence.CleanupSettings
 	PlanSeconds, ApplySeconds, PreflightSeconds, PlanTTLHours int64
 }
 
 func Load() (Config, error) {
 	c := Config{Listen: os.Getenv("COSMOFORMER_LISTEN"), Origin: os.Getenv("COSMOFORMER_ORIGIN"), DSNFile: os.Getenv("COSMOFORMER_DATABASE_DSN_FILE")}
 	c.Artifact = evidence.Settings{Bucket: os.Getenv("COSMOFORMER_ARTIFACT_BUCKET"), Region: os.Getenv("COSMOFORMER_ARTIFACT_REGION"), Owner: os.Getenv("COSMOFORMER_ARTIFACT_EXPECTED_OWNER")}
+	c.Cleanup = evidence.DefaultCleanupSettings()
+	if enabled := os.Getenv("COSMOFORMER_CLEANUP_ENABLED"); enabled != "" {
+		if enabled != "true" && enabled != "false" {
+			return c, errors.New("invalid cleanup enabled setting")
+		}
+		c.Cleanup.Enabled = enabled == "true"
+	}
 	c.UnixSocket = os.Getenv("COSMOFORMER_UNIX_SOCKET")
 	readBound := func(key string, fallback, lo, hi int64) (int64, error) {
 		v := os.Getenv("COSMOFORMER_" + key)
@@ -29,11 +37,22 @@ func Load() (Config, error) {
 		}
 		n, e := strconv.ParseInt(v, 10, 64)
 		if e != nil || n < lo || n > hi {
-			return 0, errors.New("invalid planning budget or TTL setting")
+			return 0, errors.New("invalid operational setting: " + key)
 		}
 		return n, nil
 	}
 	var budgetErr error
+	if c.Cleanup.IntervalSeconds, budgetErr = readBound("CLEANUP_INTERVAL_SECONDS", 86400, 3600, 315360000); budgetErr != nil {
+		return c, budgetErr
+	}
+	if c.Cleanup.RetentionDays, budgetErr = readBound("TERMINAL_RETENTION_DAYS", 30, 30, 365000); budgetErr != nil {
+		return c, budgetErr
+	}
+	batch, cleanupErr := readBound("CLEANUP_BATCH", 100, 1, 100)
+	if cleanupErr != nil {
+		return c, cleanupErr
+	}
+	c.Cleanup.Batch = int(batch)
 	if c.PlanSeconds, budgetErr = readBound("PLAN_SECONDS", 1200, 30, 3300); budgetErr != nil {
 		return c, budgetErr
 	}
@@ -52,6 +71,12 @@ func Load() (Config, error) {
 	return c, c.Validate()
 }
 func (c Config) Validate() error {
+	if c.Cleanup != (evidence.CleanupSettings{}) && c.Cleanup.Validate() != nil {
+		return errors.New("invalid cleanup settings")
+	}
+	if c.Cleanup.Enabled && c.Artifact.Bucket == "" {
+		return errors.New("cleanup requires configured artifact storage")
+	}
 	if c.ApplySeconds != 0 && (c.ApplySeconds < 30 || c.ApplySeconds > 3300) || c.PlanSeconds != 0 && (c.PlanSeconds < 30 || c.PlanSeconds > 3300) || c.PreflightSeconds != 0 && (c.PreflightSeconds < 30 || c.PreflightSeconds > 3300) || c.PlanTTLHours != 0 && (c.PlanTTLHours < 1 || c.PlanTTLHours > 720) {
 		return errors.New("invalid planning budget or TTL setting")
 	}

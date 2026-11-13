@@ -22,6 +22,7 @@ import (
 )
 
 type Server struct {
+	Cleanup     evidence.CleanupSettings
 	Evidence    *evidence.Custody
 	Previews    *evidence.Previews
 	Store       *store.Store
@@ -38,6 +39,7 @@ func New(s *store.Store, origin string) (http.Handler, huma.API) {
 }
 
 type Options struct {
+	Cleanup                                                   evidence.CleanupSettings
 	Evidence                                                  *evidence.Custody
 	Clock                                                     clock.Source
 	Bitbucket                                                 *bitbucket.Client
@@ -55,6 +57,10 @@ func NewWithOptions(s *store.Store, origin string, options Options) (http.Handle
 		options.Bitbucket = bitbucket.New(nil)
 	}
 	server := &Server{Store: s, Origin: origin, Coordinator: coordinator.New(s, options.Clock), Bitbucket: options.Bitbucket, Cipher: options.Cipher}
+	server.Cleanup = options.Cleanup
+	if server.Cleanup == (evidence.CleanupSettings{}) {
+		server.Cleanup = evidence.DefaultCleanupSettings()
+	}
 	server.Evidence = options.Evidence
 	server.Coordinator.Evidence = options.Evidence
 	server.Coordinator.NativeEvidence = options.NativeEvidence
@@ -87,6 +93,7 @@ func NewWithOptions(s *store.Store, origin string, options Options) (http.Handle
 	api := humago.New(mux, cfg)
 	server.registerBrowser(api)
 	server.registerAdmin(api)
+	server.registerCleanup(api)
 	server.registerConfiguration(api)
 	server.registerModules(api)
 	server.registerDependencies(api)
@@ -110,6 +117,9 @@ func NewWithOptions(s *store.Store, origin string, options Options) (http.Handle
 	})
 	if options.Background != nil && s != nil {
 		go server.sourceJobs(options.Background)
+		if server.Cleanup.Enabled && server.Cleanup.Validate() == nil && server.Evidence != nil {
+			go server.cleanupJobs(options.Background)
+		}
 	}
 	return server.middleware(mux), api
 }

@@ -13,6 +13,13 @@ import (
 // authority and deliberately does not borrow the original planner's rights or
 // require that the worker which produced historical evidence is still online.
 func ApprovalInputs(ctx context.Context, tx pgx.Tx, stack, attempt string, s runs.ExecutionSpec) error {
+	var blocked bool
+	if e := tx.QueryRow(ctx, `SELECT cosmoformer.artifact_start_blocked($1)`, stack).Scan(&blocked); e != nil {
+		return e
+	}
+	if blocked {
+		return runs.Fail("EVIDENCE_UNAVAILABLE")
+	}
 	if s.Validate() != nil {
 		return runs.Fail("INPUTS_CHANGED")
 	}

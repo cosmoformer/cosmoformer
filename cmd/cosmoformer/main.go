@@ -131,7 +131,7 @@ func run() error {
 			return e
 		}
 		defer s.Pool.Close()
-		options := httpapi.Options{Background: ctx, PlanSeconds: c.PlanSeconds, ApplySeconds: c.ApplySeconds, PreflightSeconds: c.PreflightSeconds, PlanTTLHours: c.PlanTTLHours}
+		options := httpapi.Options{Background: ctx, Cleanup: c.Cleanup, PlanSeconds: c.PlanSeconds, ApplySeconds: c.ApplySeconds, PreflightSeconds: c.PreflightSeconds, PlanTTLHours: c.PlanTTLHours}
 		if c.Artifact.Bucket != "" {
 			storage, e := evidence.NewS3(ctx, c.Artifact)
 			if e != nil {
