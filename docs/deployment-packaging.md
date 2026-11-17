@@ -15,6 +15,28 @@ inputs; they do not publish anything. `go.sum`, `npm ci --ignore-scripts` and
 `web/package-lock.json` govern dependencies. Image tags below are local names,
 not immutable deployment authority.
 
+Archive export requires a compatible Buildx builder. The default `docker` driver
+on a classic Docker image store cannot export the normalized Docker archive. Use
+a `docker-container` builder there; the package helper invokes `docker buildx
+build` so the selected builder or explicit `BUILDX_BUILDER` is honored. For
+example, CI creates and later removes its own builder with the verified BuildKit
+0.29.0 image:
+
+```sh
+docker buildx create --name cosmoformer-packaging --driver docker-container \
+  --driver-opt image=moby/buildkit:v0.29.0@sha256:0039c1d47e8748b5afea56f4e85f14febaf34452bd99d9552d2daa82262b5cc5
+docker buildx inspect --bootstrap cosmoformer-packaging
+BUILDX_BUILDER=cosmoformer-packaging make package
+# After all builds/rebuilds have finished:
+docker buildx rm cosmoformer-packaging
+```
+
+An existing compatible Docker Desktop builder also works. See Docker's
+[builder selection](https://docs.docker.com/build/builders/#difference-between-docker-build-and-docker-buildx-build)
+and [container driver](https://docs.docker.com/build/builders/drivers/docker-container/)
+documentation. Builder setup affects local build tooling; it does not launch an
+operator installation or publish packages.
+
 ```sh
 make package
 # To retain a single receipt for platform/proxy and both exact worker profiles:
@@ -627,6 +649,22 @@ tests or change product code. Image users/identities and disposal of owned local
 test resources were checked again. Migrations 001–016, dependency/runtime pins,
 coverage inputs and thresholds remained unchanged; the reviewed changes were
 uncommitted at that checkpoint.
+
+### Hosted CI packaging compatibility fix — 2026-11-18
+
+The first PR run exposed a build-tooling difference: its classic Docker image
+store could not export the normalized Docker archive through the default driver.
+The packaging job now creates an exact pinned `docker-container` BuildKit builder
+and removes it after use. The helper explicitly calls `docker buildx build` so
+builder selection is honored. No application, schema or runtime policy changed.
+
+Six focused local regression checks passed, including the actual package helper
+with a fixture that rejects the old default-driver command. Two actual no-cache
+exports of a tiny synthetic image through the pinned builder matched archive,
+manifest and config identities; its disposable builder was removed. These are
+focused portability checks, not a new full package/coverage run. Earlier full
+local results retain their recorded source identity; the PR workflow collects
+fresh package and coverage evidence for the follow-up commit.
 
 These results do not validate an actual Linux deployment host's ownership/network
 mappings, externally issued TLS renewal, a public ingress or live Bitbucket OAuth/
