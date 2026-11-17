@@ -52,24 +52,33 @@ func (a *Server) registerBrowser(api huma.API) {
 			name = "!invalid"
 		}
 		subject := identity.Digest("login/" + name)
-		wait, e := a.Store.Rate(ctx, subject, "check")
-		if e != nil {
-			return nil, fail(ctx, e)
-		}
-		if wait > 0 {
-			return nil, huma.ErrorWithHeaders(problem(ctx, 429, "Too many attempts. Try again later."), http.Header{"Retry-After": {strconv.Itoa(wait)}})
-		}
 		account, e := a.Store.LoginAccount(ctx, name)
 		if e != nil && !errors.Is(e, store.ErrNotFound) {
 			return nil, fail(ctx, e)
 		}
-		verify := a.Hasher.Verify(ctx, in.Body.Password, account.PasswordPHC)
+		var admissionError error
+		verify := a.Hasher.VerifyGuarded(ctx, in.Body.Password, account.PasswordPHC, func() error {
+			wait, err := a.Store.Rate(ctx, subject, "check")
+			if err != nil {
+				admissionError = fail(ctx, err)
+			} else if wait > 0 {
+				admissionError = huma.ErrorWithHeaders(problem(ctx, 429, "Too many attempts. Try again later."), http.Header{"Retry-After": {strconv.Itoa(wait)}})
+			}
+			return admissionError
+		})
+		if admissionError != nil {
+			return nil, admissionError
+		}
 		if errors.Is(verify, identity.ErrBusy) {
 			return nil, problem(ctx, 429, "Sign-in is busy. Try again shortly.")
 		}
 		if verify != nil || !account.Enabled {
-			if _, e = a.Store.Rate(ctx, subject, "failure"); e != nil {
+			wait, e := a.Store.Rate(ctx, subject, "failure")
+			if e != nil {
 				return nil, fail(ctx, e)
+			}
+			if wait > 0 {
+				return nil, huma.ErrorWithHeaders(problem(ctx, 429, "Too many attempts. Try again later."), http.Header{"Retry-After": {strconv.Itoa(wait)}})
 			}
 			return nil, problem(ctx, 401, "Username or password is incorrect.")
 		}

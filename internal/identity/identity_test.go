@@ -2,9 +2,45 @@ package identity
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
+
+func TestGuardedVerificationAdmission(t *testing.T) {
+	for _, state := range []string{"busy", "canceled", "guard-denied"} {
+		t.Run(state, func(t *testing.T) {
+			h := &Hasher{active: make(chan struct{}, 2), admitted: make(chan struct{}, 10)}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			want := errors.New("accounting unavailable")
+			if state == "busy" {
+				for range 10 {
+					h.admitted <- struct{}{}
+				}
+				want = ErrBusy
+			} else if state == "canceled" {
+				cancel()
+				want = context.Canceled
+			}
+			calls := 0
+			wantCalls := 0
+			if state == "guard-denied" {
+				wantCalls = 1
+			}
+			err := h.VerifyGuarded(ctx, "synthetic password", "malformed verifier", func() error {
+				calls++
+				return want
+			})
+			if !errors.Is(err, want) || calls != wantCalls {
+				t.Fatal("reservation escaped bounded admission", state, calls, err)
+			}
+			if len(h.active) != 0 || state != "busy" && len(h.admitted) != 0 {
+				t.Fatal("verification admission leaked")
+			}
+		})
+	}
+}
 
 func TestCredentials(t *testing.T) {
 	h := NewHasher()

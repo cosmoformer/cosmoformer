@@ -1,4 +1,4 @@
-import {test,expect,type Page} from '@playwright/test';
+import {test,expect,type Page} from './fixtures/test';
 import {approvalSummary,reviewSession,projects,runResponse,org,project,env,run,reviewID} from './fixtures/review';
 const path=`/o/${org}/p/${project}/runs/${run}?env=${env}`;
 async function fixture(page:Page){

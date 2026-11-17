@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -313,17 +314,57 @@ func TestBrowserServer(t *testing.T) {
 	if _, e = db.Owner.Exec(ctx, `INSERT INTO cosmoformer.accounts(username,display_name,installation_admin,password_phc) VALUES('browseradmin','Browser administrator',true,$1)`, phc); e != nil {
 		t.Fatal(e)
 	}
-	b, _ := json.Marshal(map[string]any{"username": "browseradmin", "password": pass, "review_username": "admin", "review_password": password, "review": review, "org": f.org})
+	var artifact struct {
+		ID   string `json:"id"`
+		Hash string `json:"sha256"`
+		Size int64  `json:"size"`
+	}
+	if e = db.Owner.QueryRow(ctx, `SELECT id::text,encode(sha256,'hex'),byte_count FROM cosmoformer.artifacts WHERE attempt_id=$1 AND kind='normalized_changes' AND state='finalized'`, f.assignment.AttemptID).Scan(&artifact.ID, &artifact.Hash, &artifact.Size); e != nil {
+		t.Fatal(e)
+	}
+	// A separate, explicitly scoped reader exercises the protected content stream
+	// without granting raw evidence to the ordinary plan-review actor.
+	var reader string
+	if e = db.Owner.QueryRow(ctx, `INSERT INTO cosmoformer.accounts(username,display_name,password_phc) SELECT 'evidencebrowser','Browser evidence reader',password_phc FROM cosmoformer.accounts WHERE username='admin' RETURNING id::text`).Scan(&reader); e != nil {
+		t.Fatal(e)
+	}
+	f.exec(t, `INSERT INTO cosmoformer.memberships(org_id,account_id) VALUES($1,$2)`, f.org, reader)
+	readerTeam := id(f.admin.call("POST", "/organizations/"+f.org+"/teams", map[string]any{"name": "Browser evidence readers"}, 200))
+	f.exec(t, `INSERT INTO cosmoformer.team_members(org_id,team_id,account_id) VALUES($1,$2,$3)`, f.org, readerTeam, reader)
+	for _, role := range []string{"viewer", "raw_evidence_read"} {
+		f.exec(t, `INSERT INTO cosmoformer.grants(org_id,team_id,project_id,environment_id,role) SELECT org_id,$1,project_id,environment_id,$2 FROM cosmoformer.grants WHERE role='planner' LIMIT 1`, readerTeam, role)
+	}
+	b, _ := json.Marshal(map[string]any{"username": "browseradmin", "password": pass, "review_username": "admin", "review_password": password, "review": review, "org": f.org, "review_artifact": artifact, "evidence_username": "evidencebrowser"})
 	file := "../../.build/testdb/browser.json"
-	if e = os.WriteFile(file, b, 0600); e != nil {
+	credentials, e := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if e != nil {
 		t.Fatal(e)
 	}
 	defer os.Remove(file)
+	if _, e = credentials.Write(b); e != nil {
+		credentials.Close()
+		t.Fatal(e)
+	}
+	if e = credentials.Close(); e != nil {
+		t.Fatal(e)
+	}
 	cipher, _ := cryptostore.New(bytes.Repeat([]byte{42}, 32))
 	handler, _ := httpapi.NewWithOptions(db.App, "https://localhost:5174", httpapi.Options{Evidence: &evidence.Custody{Storage: f.storage, Bucket: "synthetic"}, Clock: &approvalClock{start: time.Now()}, Cipher: cipher, Bitbucket: bitbucket.New(&http.Client{Transport: f.remote})})
 	server := &http.Server{Addr: "127.0.0.1:18081", Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	done := make(chan error, 1)
-	go func() { done <- server.ListenAndServe() }()
+	if socket := os.Getenv("COSMOFORMER_BROWSER_SOCKET"); socket != "" {
+		listener, err := net.Listen("unix", socket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = os.Chmod(socket, 0600); err != nil {
+			t.Fatal(err)
+		}
+		server.ConnContext = httpapi.ConnectionContext
+		go func() { done <- server.Serve(listener) }()
+	} else {
+		go func() { done <- server.ListenAndServe() }()
+	}
 	fmt.Println("Isolated browser account server ready.")
 	select {
 	case e := <-done:

@@ -1,0 +1,21 @@
+proxy_pass http://cosmoformer;
+proxy_http_version 1.1;
+proxy_set_header Host $host;
+proxy_set_header Connection "";
+# These replace client headers. Go trusts only the protected Unix transport;
+# its configured canonical origin remains the origin/CSRF/OAuth authority.
+proxy_set_header X-Cosmoformer-Client-IP $remote_addr;
+proxy_set_header X-Forwarded-For "";
+proxy_set_header X-Forwarded-Host "";
+proxy_set_header X-Forwarded-Proto "";
+proxy_set_header Forwarded "";
+proxy_connect_timeout 5s;
+proxy_read_timeout 35s;
+proxy_send_timeout 35s;
+proxy_request_buffering off;
+proxy_buffering off;
+proxy_cache off;
+proxy_intercept_errors off;
+proxy_hide_header Cache-Control;
+add_header Cache-Control no-store always;
+include /etc/nginx/csp.conf;

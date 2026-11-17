@@ -1,0 +1,36 @@
+name: ${COMPOSE_PROJECT_NAME:?set a unique worker project name}
+services:
+  worker:
+    image: ${WORKER_IMAGE:?set verified exact engine/version/architecture image ID or digest reference}
+    platform: linux/amd64
+    user: '10001:10001'
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
+    cpus: 2
+    mem_limit: 3g
+    stop_signal: SIGTERM
+    stop_grace_period: 330s
+    ulimits:
+      nofile: {soft: 4096, hard: 4096}
+      fsize: {soft: 2147483648, hard: 2147483648}
+    environment:
+      COSMOFORMER_PLATFORM_ORIGIN: ${COSMOFORMER_PLATFORM_ORIGIN:?set canonical HTTPS origin}
+      COSMOFORMER_TOKEN_FILE: /run/inputs/worker.json
+      COSMOFORMER_RUNTIME_ID: ${COSMOFORMER_RUNTIME_ID:?set separately approved runtime UUID}
+      COSMOFORMER_IMAGE_DIGEST: ${COSMOFORMER_IMAGE_DIGEST:?set operator-verified worker manifest digest}
+      COSMOFORMER_EXPECTED_BOOTSTRAP_PRINCIPAL: ${COSMOFORMER_EXPECTED_BOOTSTRAP_PRINCIPAL:?set exact bootstrap principal ARN}
+      COSMOFORMER_ATTEMPT_DIR: /var/lib/cosmoformer/attempts
+    volumes:
+      - type: bind
+        source: ${WORKER_TOKEN_FILE:?set protected enrollment credential file}
+        target: /run/inputs/worker.json
+        read_only: true
+        bind: {create_host_path: false}
+    # Providers and native executables run from attempt-private directories.
+    # noexec here would break actual native supervision and provider startup.
+    tmpfs:
+      - /var/lib/cosmoformer/attempts:rw,exec,nosuid,nodev,size=2g,uid=10001,gid=10001,mode=0700
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700

@@ -7,3 +7,9 @@ web/.react-router
 web/app/.generated
 *.tfstate*
 *.tfplan
+web/test-results
+web/playwright-report
+**/.env*
+**/*.pem
+**/*.key
+**/*.dsn

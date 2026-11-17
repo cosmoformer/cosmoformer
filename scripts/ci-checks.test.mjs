@@ -10,9 +10,10 @@ import {prepareSnapshot} from './sonar-coverage.mjs';
 const inventory = Array.from({length: 12}, (_, i) => `TestFixture${String(i).padStart(2, '0')}`);
 const profile = 'mode: atomic\ngithub.com/cosmoformer/cosmoformer/internal/main.go:1.1,2.2 10 1\n';
 test('required gate rejects failed, skipped, cancelled or missing jobs, including native tests without coverage', () => {
-    const jobs = Object.fromEntries(['backend', 'acceptance', 'linux', 'native', 'runtime', 'web', 'scripts'].map(id => [id, {result: 'success'}]));
+    const jobs = Object.fromEntries(['backend', 'acceptance', 'linux', 'native', 'packaging', 'runtime', 'web', 'scripts'].map(id => [id, {result: 'success'}]));
     assert.doesNotThrow(() => requireSuccessfulJobs(jobs));
     for (const result of ['failure', 'skipped', 'cancelled', null]) assert.throws(() => requireSuccessfulJobs({...jobs, native: {result}}));
+    for (const result of ['failure', 'skipped', 'cancelled']) assert.throws(() => requireSuccessfulJobs({...jobs, packaging: {result}}));
     const missing = {...jobs}; delete missing.native;
     for (const value of [missing, {}, null, {...jobs, extra: {result: 'success'}}]) assert.throws(() => requireSuccessfulJobs(value));
 });
@@ -84,6 +85,33 @@ test('Go failure cleans raw counters and cannot publish an artifact', t => {
     assert.ok(!readdirSync(path.join(f.base, '.build/coverage')).some(name => name.startsWith('go-raw.')));
     assert.throws(() => readFileSync(path.join(f.base, '.build/ci/artifact/receipt.json')));
     assert.throws(() => runGoProducer('unknown', f.options), /Unknown/);
+});
+test('failed Go collection retains complete diagnostics beyond inspected-error truncation', t => {
+    const f=fixture(t), run=f.run;
+    const stdout='synthetic test output\n'.repeat(2000)+'original failing assertion\n';
+    const stderr='synthetic test diagnostic\n'.repeat(1000)+'final stderr detail\n';
+    const failure=Object.assign(Error('Go test failed'),{stdout,stderr});
+    const logged=[], errors=[];
+    t.mock.method(console,'log',value=>logged.push(value));
+    t.mock.method(console,'error',value=>errors.push(value));
+    assert.throws(()=>runGoProducer('backend',{...f.options,run:(command,args,options)=>{
+        if(args.includes('-json'))throw failure;
+        return run(command,args,options);
+    }}),error=>error===failure);
+    assert.deepEqual(logged,[stdout]);assert.deepEqual(errors,[stderr]);
+    assert.ok(!readdirSync(path.join(f.base,'.build/coverage')).some(name=>name.startsWith('go-raw.')));
+    assert.throws(()=>readFileSync(path.join(f.base,'.build/ci/artifact/receipt.json')));
+});
+test('invalid Go producer cannot delete another producer reports or generated context', t => {
+    const f = fixture(t);
+    f.write('.build/coverage/web/lcov.info', 'previous web report');
+    f.write('web/app/.generated/api.ts', 'generated context');
+    f.write('.build/ci/artifact/receipt.json', 'previous sealed receipt');
+    assert.throws(() => runGoProducer('web', f.options), /Unknown Go producer/);
+    assert.equal(f.calls.length, 0);
+    assert.equal(readFileSync(path.join(f.base, '.build/coverage/web/lcov.info'), 'utf8'), 'previous web report');
+    assert.equal(readFileSync(path.join(f.base, 'web/app/.generated/api.ts'), 'utf8'), 'generated context');
+    assert.equal(readFileSync(path.join(f.base, '.build/ci/artifact/receipt.json'), 'utf8'), 'previous sealed receipt');
 });
 test('verified coverage is unioned once, restores only type context and passes existing fresh-snapshot checks', t => {
     const f = fixture(t), input = f.all(); assembleCoverage(input, f.options);

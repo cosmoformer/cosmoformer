@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cosmoformer/cosmoformer/internal/store"
 	"github.com/cosmoformer/cosmoformer/internal/testsupport"
 )
 
@@ -51,7 +52,7 @@ func TestCommandArguments(t *testing.T) {
 	t.Run("migration inventory without database", func(t *testing.T) {
 		output, err := testsupport.Command(t, binary, "migrate", "--list").CombinedOutput()
 		requireExit(t, output, err, 0, "migrations/013_saved_plan_apply.sql")
-		if strings.Count(string(output), "migrations/") != 16 {
+		if strings.Count(string(output), "migrations/") != int(store.SchemaVersion) {
 			t.Fatal("unexpected embedded migration inventory")
 		}
 	})

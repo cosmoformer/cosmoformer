@@ -32,7 +32,7 @@ Holds reference an existing same-tenant plan, accepted operation, attempt, or re
 
 Migration 008 advances the runtime to schema version 8. It preserves migrations 001–007 and adds immutable execution assignment snapshots, preparation/credential deadlines, provider-lock attestation links, producing-command artifact ordinals and exact spawn/stop facts. Readiness checks require the new integrity triggers. Narrow tenant-checked helpers validate only an attempt's own binding, observe the authority clock and place contradictory execution facts under attention; the runtime still cannot list or mutate global backend targets directly. Migration and serving remain separate commands.
 
-Migration 009 preserves migrations 001–008 and alters all existing SECURITY DEFINER helpers in place to use `pg_catalog, cosmoformer, pg_temp`. Explicitly putting temporary relations last prevents runtime-owned temporary tables from replacing trusted application tables in helper lookups. Function identities, bodies and grants remain unchanged. Serving requires schema version 16 and rejects any definer helper with a different owner or search path. Run the explicit owner migration before restarting the runtime; serving does not repair database configuration. Regression checks cover durable encryption accounting with colliding temporary tables, cold/cached calls, unsafe configuration rejection, and version-8 upgrade of an already-open connection. This validation uses dummy data and ordinary tables, with no privilege-escalation payload or live database probe.
+Migration 009 preserves migrations 001–008 and alters all existing SECURITY DEFINER helpers in place to use `pg_catalog, cosmoformer, pg_temp`. Explicitly putting temporary relations last prevents runtime-owned temporary tables from replacing trusted application tables in helper lookups. Function identities, bodies and grants remain unchanged. Serving requires schema version 17 and rejects any definer helper with a different owner or search path. Run the explicit owner migration before restarting the runtime; serving does not repair database configuration. Regression checks cover durable encryption accounting with colliding temporary tables, cold/cached calls, unsafe configuration rejection, and version-8 upgrade of an already-open connection. This validation uses dummy data and ordinary tables, with no privilege-escalation payload or live database probe.
 
 Migration 006 refuses a database containing version-5 artifacts or backup sets with `EVIDENCE_METADATA_RECONCILIATION_REQUIRED`. Version 5 lacks bucket and installation capture metadata; neither can be safely inferred. The migration visits each tenant under FORCE RLS and fails transactionally without advancing the version. Preserve the database and reconcile verified metadata through a separately reviewed migration before retrying; do not delete evidence to bypass this guard. Databases containing account/source/preflight/binding records without these legacy evidence rows upgrade directly. No backup capture or evidence deletion occurs during migration.
 
@@ -220,7 +220,9 @@ Two wording ambiguities need retaining in future UI integration. I4's single-sum
 
 ### Authentication proxy client identity
 
-The supported local frontend overwrites `X-Cosmoformer-Client-IP` from its actual socket peer. The API accepts that metadata only when its connection context records a real Unix transport; the listener must remain in its owner-held 0700 directory with a 0600 socket. A custom proxy using that protected socket must likewise overwrite this header rather than forward caller claims. Missing metadata is reserved for direct trusted-owner IPC and has a separate budget. Duplicate, malformed, scoped or unspecified addresses are rejected. IPv4-mapped addresses are normalized. TCP API connections ignore all forwarding claims and use their transport peer. Clients sharing a canonical IP share admission; this is not per-account or per-OS-user isolation. Invalid public-authentication methods return 405 without consuming login/setup/reset admission. Account throttling and bounded password hashing remain independent controls.
+The supported local frontend overwrites `X-Cosmoformer-Client-IP` from its actual socket peer. The API accepts that metadata only when its connection context records a real Unix transport; the listener must remain in its owner-held 0700 directory with a 0600 socket. A custom proxy using that protected socket must likewise overwrite this header rather than forward caller claims. Missing metadata is reserved for direct trusted-owner IPC and has a separate budget. Duplicate, malformed, scoped or unspecified addresses are rejected. IPv4-mapped addresses are normalized. TCP API connections ignore all forwarding claims and use their transport peer. Clients sharing a canonical IP share admission; this is not per-account or per-OS-user isolation. Invalid public-authentication methods return 405 without consuming login/setup/reset admission. Account throttling and bounded password hashing remain independent controls. Account admission reserves one of the 10,000 bounded subject rows only after acquiring a verification slot. A new subject at capacity receives 429 with Retry-After before password verification; existing tracked subjects keep their ordinary five-failure/15-minute policy. A zero-failure reservation does not count as a failed password, its first failure starts the failure window, successful login releases it, and abandoned rows expire after 30 minutes. Busy or already-canceled verification never runs reservation admission. Nonzero failure-accounting waits are also returned as 429, including capacity changes after the initial check.
+
+Migration 017 replaces only the authentication throttle function, preserves migrations 001–016 and advances readiness to schema 17. Stop the single coordinator and apply the explicit owner migration before starting the new binary; startup never migrates automatically. Existing throttle state and function grants are retained. The focused local fixture confirmed the conditional full-table accounting defect with seeded synthetic rows, then verified the fix, atomic last-slot reservation, correct-login recovery and version-16 upgrade. It did not establish that a deployed caller can attain or maintain capacity through real approved peers.
 
 ## Exact-plan approvals
 
@@ -410,7 +412,7 @@ GET `/organizations/{org}/stacks/{id}/dependencies` identifies the accepted stac
 
 ## Operator maintenance and restoration (milestone 13)
 
-Schema **15** adds host operation evidence, an offline latch, rotation receipts and exact backup manifests. Migrations **001–014 remain unchanged**. These workflows use the existing coordination gate, encryption ledger, FORCE RLS, artifact holds, backend namespace claims and recovery cases. They do not operate a backup service, provision infrastructure or rotate upstream credentials. Company compatibility remains **`not_assessed`**. Schema 16 adds artifact cleanup as described below; deployment packaging and company adoption remain milestones 15 and 16.
+Schema **15** adds host operation evidence, an offline latch, rotation receipts and exact backup manifests. Migrations **001–014 remain unchanged**. These workflows use the existing coordination gate, encryption ledger, FORCE RLS, artifact holds, backend namespace claims and recovery cases. They do not operate a backup service, provision infrastructure or rotate upstream credentials. Company compatibility remains **`not_assessed`**. Schema 16 adds artifact cleanup as described below. Milestone 15 now provides [local deployment packaging](deployment-packaging.md); company adoption remains milestone 16.
 
 ### Authority, maintenance and independent stop evidence
 
@@ -619,8 +621,9 @@ Review validation passed: Go race/unit checks and vet (including integration-tag
 Cleanup is disabled by default. Before enabling it, test **backup-hold capture,
 backup restoration, key recovery and exact artifact-version restoration together**
 using isolated fixtures. Cleanup cannot discover undeclared external backups.
-Company compatibility remains `not_assessed`; deployment packaging and company
-adoption remain milestones 15 and 16.
+Company compatibility remains `not_assessed`. Milestone 15 now provides
+[local deployment packaging](deployment-packaging.md); company adoption remains
+milestone 16.
 
 The host settings use the usual `COSMOFORMER_` prefix:
 
@@ -731,3 +734,16 @@ This is artifact-object retention, not a database purge. Platform metadata, audi
 history, bindings, recovery records, backup manifests and backup custody records
 remain. Historical Changes/downloads report unavailable exact evidence; logs show
 archive gaps. Review never recreates past evidence from current inputs.
+
+
+## Deployment packaging (milestone 15)
+
+See the [deployment packaging guide](deployment-packaging.md) for pinned image
+builds, exact source/binary/image verification, separate platform/worker Compose
+references, private Nginx/TLS behavior and measured packaged checks. These
+references require explicit database preparation, forward migrations, key
+registration, bootstrap, runtime approval and worker enrollment. Starting them
+never performs those actions. The existing maintenance, cleanup quiescence,
+backup custody, restore reconciliation and emergency handback procedures above
+remain authoritative. Adoption is milestone 16; company compatibility stays
+`not_assessed`.

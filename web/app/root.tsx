@@ -2,7 +2,8 @@ import { Links, Meta, Outlet, Scripts, ScrollRestoration, isRouteErrorResponse, 
 import { AppearanceProvider } from "./lib/appearance";
 import "@astryxdesign/core/reset.css";
 import "@astryxdesign/core/astryx.css";
-import "@astryxdesign/theme-neutral/fonts.css";
+// Use the theme's system-font fallbacks. Its optional fonts.css imports Google
+// Fonts and is incompatible with the packaged application's same-origin policy.
 import "@astryxdesign/theme-neutral/theme.css";
 import "./app.css";
 import { SessionProvider } from "./lib/session";

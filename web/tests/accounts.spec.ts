@@ -1,10 +1,10 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/test';
 import { readFileSync } from 'node:fs';
 const credentials = () => JSON.parse(readFileSync(new URL('../../.build/testdb/browser.json', import.meta.url), 'utf8')) as {
     username: string;
     password: string;
 };
-test('accounts, scoped access and source-worker enrollment', async ({ page, browser }, testInfo) => {
+test('accounts, scoped access and source-worker enrollment', async ({ page, newContext }, testInfo) => {
     const pageErrors: string[] = [];
     page.on('pageerror', error => pageErrors.push(error.message));
     const admin = credentials();
@@ -26,7 +26,7 @@ test('accounts, scoped access and source-worker enrollment', async ({ page, brow
     await expect(row).toBeVisible();
     await row.getByRole('button', { name: 'Setup code', exact: true }).click();
     const code = (await page.locator('.once-visible code').innerText()).trim();
-    const context = await browser.newContext({ ignoreHTTPSErrors: true, baseURL: 'https://localhost:5174' });
+    const context = await newContext({ ignoreHTTPSErrors: true, baseURL: 'https://localhost:5174' });
     const engineer = await context.newPage();
     engineer.on('pageerror', error => pageErrors.push(error.message));
     await engineer.goto('/account/setup');

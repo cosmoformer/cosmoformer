@@ -90,7 +90,7 @@ test-ci-go:
 # time. No database, cloud credential, developer home or Docker socket is mounted.
 test-source:
 	docker build --quiet --platform linux/amd64 --target source-tests -f deploy/worker/Dockerfile -t cosmoformer-worker-source-tests:local .
-	docker run --rm --network none --platform linux/amd64 cosmoformer-worker-source-tests:local
+	docker run --rm --init --network none --platform linux/amd64 --read-only --cpus 2 --memory 3g --pids-limit 256 --cap-drop ALL --security-opt no-new-privileges --tmpfs /var/lib/cosmoformer/attempts:rw,exec,nosuid,nodev,size=2g,uid=10001,gid=10001,mode=0700 --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700 -e TMPDIR=/var/lib/cosmoformer/attempts cosmoformer-worker-source-tests:local
 
 # Closed, public fixture manifest only. Validate every record before any build;
 # runtime containers receive no host environment, network, mounts or credentials.
@@ -114,7 +114,7 @@ const run=args=>{const p=spawnSync("docker",args,{stdio:"inherit"});if(p.error)t
 const selected=process.env.COSMOFORMER_NATIVE_ENGINE||"";if(selected&&!Object.hasOwn(pins,selected))fail();
 for(const r of m.runtimes.filter(r=>!selected||r.engine===selected)){const a=r.engine_archive,tag=`cosmoformer-native-tests:$${r.engine}-$${r.version}`;
 run(["build","--platform=linux/amd64","--target=native-tests","-f","deploy/worker/Dockerfile",...Object.entries({ENGINE:r.engine,ENGINE_VERSION:r.version,ENGINE_URL:a.url,ENGINE_SHA256:a.sha256,ENGINE_MEMBER:a.member,BASE_IMAGE:r.base_image_ref}).flatMap(([k,v])=>["--build-arg",`$${k}=$${v}`]),"-t",tag,"."]);
-run(["run","--rm","--platform=linux/amd64","--network=none","--read-only","--cpus","2","--memory","3g","--pids-limit","256","--cap-drop","ALL","--security-opt","no-new-privileges","--ulimit","fsize=268435456:268435456","--ulimit","nofile=4096:4096","--tmpfs","/tmp:rw,exec,nosuid,nodev,size=1g",...Object.entries({COSMOFORMER_TEST_NATIVE:"1",COSMOFORMER_TEST_NATIVE_ENGINE:r.engine,COSMOFORMER_TEST_NATIVE_VERSION:r.version,COSMOFORMER_TEST_NATIVE_BINARY:`/usr/local/bin/$${a.member}`,COSMOFORMER_TEST_NATIVE_PROFILE_FILE:"/fixtures/runtimes.json",COSMOFORMER_TEST_NATIVE_PACKAGE_DIR:"/fixtures/provider-mirror"}).flatMap(([k,v])=>["-e",`$${k}=$${v}`]),tag]);}
+run(["run","--rm","--init","--platform=linux/amd64","--network=none","--read-only","--cpus","2","--memory","3g","--pids-limit","256","--cap-drop","ALL","--security-opt","no-new-privileges","--ulimit","fsize=268435456:268435456","--ulimit","nofile=4096:4096","--tmpfs","/tmp:rw,exec,nosuid,nodev,size=1g",...Object.entries({COSMOFORMER_TEST_NATIVE:"1",COSMOFORMER_TEST_NATIVE_ENGINE:r.engine,COSMOFORMER_TEST_NATIVE_VERSION:r.version,COSMOFORMER_TEST_NATIVE_BINARY:`/usr/local/bin/$${a.member}`,COSMOFORMER_TEST_NATIVE_PROFILE_FILE:"/fixtures/runtimes.json",COSMOFORMER_TEST_NATIVE_PACKAGE_DIR:"/fixtures/provider-mirror"}).flatMap(([k,v])=>["-e",`$${k}=$${v}`]),tag]);}
 endef
 
 test-native: export COSMOFORMER_NATIVE_TEST_SCRIPT = $(NATIVE_TEST_SCRIPT)
@@ -124,7 +124,7 @@ test-native:
 
 test-scripts:
 	mkdir -p .build/coverage/workflows
-	COSMOFORMER_GO=$(GO) $(NODE) --test --experimental-test-coverage --test-coverage-include='scripts/*.mjs' --test-coverage-exclude='scripts/*.test.mjs' --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=.build/coverage/workflows/lcov.info scripts/check-go-coverage.test.mjs scripts/overall-coverage.test.mjs scripts/sonar-coverage.test.mjs scripts/merge-go-coverage.test.mjs scripts/ci-checks.test.mjs scripts/native-make.test.mjs scripts/workflow-lib.test.mjs scripts/workflows.test.mjs scripts/local-api.test.mjs scripts/local-env.test.mjs web/scripts/contract.test.mjs
+	COSMOFORMER_GO=$(GO) $(NODE) --test --experimental-test-coverage --test-coverage-include='scripts/*.mjs' --test-coverage-exclude='scripts/*.test.mjs' --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=.build/coverage/workflows/lcov.info scripts/check-go-coverage.test.mjs scripts/overall-coverage.test.mjs scripts/sonar-coverage.test.mjs scripts/merge-go-coverage.test.mjs scripts/ci-checks.test.mjs scripts/go-coverage.test.mjs scripts/package-reproducibility.test.mjs scripts/package-fixture.test.mjs scripts/native-make.test.mjs scripts/workflow-lib.test.mjs scripts/workflows.test.mjs scripts/local-api.test.mjs scripts/local-env.test.mjs web/scripts/contract.test.mjs
 
 worker-image:
 	docker build --quiet --platform linux/amd64 --target worker -f deploy/worker/Dockerfile -t cosmoformer-worker:local .
@@ -137,7 +137,7 @@ test-overall-coverage:
 
 test-coverage:
 	$(MAKE) coverage-start
-	$(MAKE) test-go-coverage test-web-coverage test-contract-coverage test-scripts test-runtime-coverage
+	$(MAKE) test-go-coverage test-web-coverage test-contract-coverage test-scripts test-runtime-coverage test-package
 
 # Existing integration checks, with coverage from their real Node child processes.
 test-runtime-coverage: local-image
@@ -149,12 +149,11 @@ test-contract-coverage:
 	COSMOFORMER_GO=$(GO) $(NODE) --test --experimental-test-coverage --test-coverage-include=web/scripts/contract.mjs --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=.build/coverage/contract/lcov.info web/scripts/contract.test.mjs
 
 # Includes acceptance calls in the same profile as unit tests; never use the dev DB.
-test-go-coverage: test-linux-coverage
+test-go-coverage:
+	$(NODE) scripts/go-coverage.mjs reset
+	$(MAKE) test-linux-coverage
 	mkdir -p .build/coverage
-	@set -eu; cover_dir=$$(mktemp -d "$(CURDIR)/.build/coverage/go-raw.XXXXXX"); \
-	trap 'rm -rf "$$cover_dir"' EXIT; \
-	COSMOFORMER_TEST_COVER_DIR="$$cover_dir" $(GO) test -race -count=1 -timeout=30m -tags=integration -covermode=atomic -coverpkg=./internal/...,./cmd/... ./internal/... ./cmd/... ./tests/acceptance -args -test.gocoverdir="$$cover_dir"; \
-	$(GO) tool covdata textfmt -i="$$cover_dir" -o=.build/coverage/go.host.out
+	COSMOFORMER_GO=$(GO) $(NODE) scripts/go-coverage.mjs
 	mkdir -p .build/coverage/scripts
 	$(NODE) --test --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=.build/coverage/scripts/lcov.info scripts/merge-go-coverage.test.mjs scripts/check-go-coverage.test.mjs
 	$(NODE) scripts/merge-go-coverage.mjs .build/coverage/go.out .build/coverage/go.host.out .build/coverage/linux/source.out .build/coverage/linux/worker.out .build/coverage/linux/clock.out .build/coverage/linux/command.out
@@ -194,3 +193,18 @@ check:
 	$(MAKE) test-runtime-coverage
 	$(MAKE) test-web
 	$(MAKE) test-contract-coverage
+	$(MAKE) test-package
+
+# Local-only packages and verification; no registry publication or deployment.
+.PHONY: package test-package test-package-browser
+package:
+	$(NODE) scripts/package-build.mjs
+
+test-package:
+	mkdir -p .build/coverage/packaging
+	$(NODE) --test --experimental-test-coverage --test-coverage-include='scripts/*.mjs' --test-coverage-exclude='scripts/*.test.mjs' --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=.build/coverage/packaging/lcov.info scripts/package-verification.test.mjs
+
+test-package-browser:
+	$(NODE) scripts/package-build.mjs platform proxy browser-fixture
+	mkdir -p .build/browser-tmp
+	cd web && COSMOFORMER_PACKAGED_BROWSER=1 TMPDIR=$(CURDIR)/.build/browser-tmp npm test

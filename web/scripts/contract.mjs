@@ -11,7 +11,7 @@ import ts from 'typescript';
 const root = path.resolve(import.meta.dirname, '../..');
 mkdirSync(path.join(root, '.build'), { recursive: true });
 const local = path.join(root, '.build/tools/go/bin/go');
-const raw = execFileSync(process.env.COSMOFORMER_GO || (existsSync(local) ? local : 'go'), ['run', './cmd/contract'], { cwd: root, env: { ...process.env, GOCACHE: path.join(root, '.build/go-cache'), GOPATH: path.join(root, '.build/gopath') }, maxBuffer: 16 * 1024 * 1024 });
+const raw = execFileSync(process.env.COSMOFORMER_CONTRACT_BINARY || process.env.COSMOFORMER_GO || (existsSync(local) ? local : 'go'), process.env.COSMOFORMER_CONTRACT_BINARY ? [] : ['run', './cmd/contract'], { cwd: root, env: { ...process.env, GOCACHE: path.join(root, '.build/go-cache'), GOPATH: path.join(root, '.build/gopath') }, maxBuffer: 16 * 1024 * 1024 });
 writeFileSync(path.join(root, '.build/openapi.json'), raw);
 const api = JSON.parse(raw), dir = path.join(root, 'web/app/.generated');
 mkdirSync(dir, { recursive: true });
