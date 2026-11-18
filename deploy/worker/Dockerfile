@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 ARG BASE_IMAGE=debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 FROM golang:1.27.3-trixie@sha256:af1bfc2614ebb1dbd31af514b78740fd678850e76498762b425ecee4c5c6ea80 AS build
+ARG SOURCE_DATE_EPOCH
 ARG TARGETARCH
 RUN test "$TARGETARCH" = amd64
 WORKDIR /src
@@ -29,13 +30,17 @@ RUN CGO_ENABLED=0 go test -c -o /out/source.test ./internal/source \
  && CGO_ENABLED=0 go test -c -o /out/command.test ./cmd/worker
 
 FROM ${BASE_IMAGE} AS engine
+# Epoch-key RUN caches and omit wall-clock build logs/account backups from each
+# creating layer, including ldconfig's inode cache; the locked runtime account's last-change day uses that epoch.
+ARG SOURCE_DATE_EPOCH
 ARG TARGETARCH
 RUN test "$TARGETARCH" = amd64
 RUN rm -f /etc/apt/sources.list.d/debian.sources \
  && printf 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20261105T000000Z trixie main\n' > /etc/apt/sources.list \
  && apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl unzip 'git=1:2.47.3-0+deb13u1' \
- && test "$(dpkg-query -W '-f=${Version}' git)" = '1:2.47.3-0+deb13u1'
+ && test "$(dpkg-query -W '-f=${Version}' git)" = '1:2.47.3-0+deb13u1' \
+ && rm -rf /var/log/* /var/cache/ldconfig/aux-cache
 ARG ENGINE=opentofu
 ARG VERSION=1.13.8
 ARG ARCHIVE_SHA256=aa4382a5eefcf026309d07398ea803f97b9218a17d940999a938be22bfe9d73f
@@ -63,6 +68,8 @@ RUN set -eu; \
  printf '{"engine":"%s","version":"%s","arch":"amd64","binary_sha256":"%s","git_package_version":"1:2.47.3-0+deb13u1","git_version":"git version 2.47.3"}\n' "$ENGINE" "$VERSION" "$binary_sha256" > /usr/local/share/cosmoformer/runtime.json; \
  rm -f /tmp/runtime.zip; apt-get purge -y curl unzip; rm -rf /var/lib/apt/lists/*; \
  groupadd --gid 10001 cosmoformer; useradd --uid 10001 --gid 10001 --no-create-home cosmoformer; \
+ if [ -n "${SOURCE_DATE_EPOCH:-}" ]; then chage -d "$((SOURCE_DATE_EPOCH / 86400))" cosmoformer; fi; \
+ rm -f /etc/shadow- /etc/gshadow- /etc/passwd- /etc/group-; rm -rf /var/log/* /var/cache/ldconfig/aux-cache; \
  chown 10001:10001 /var/lib/cosmoformer/attempts
 USER 10001:10001
 

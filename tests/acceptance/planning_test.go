@@ -36,6 +36,7 @@ func newPlanningFixture(t *testing.T) *preflightFixture {
 	t.Helper()
 	f := newPreflightFixture(t)
 	f.enablePlanning(t)
+	f.ticks.followElapsed()
 	return f
 }
 func (f *preflightFixture) enablePlanning(t *testing.T) {

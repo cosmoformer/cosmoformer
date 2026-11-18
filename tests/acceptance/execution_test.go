@@ -139,6 +139,7 @@ func newExecutionFixtureForSourcePolicy(t *testing.T, source map[string]any, rev
 	nativeSourceHash := sha256.Sum256(nativeSource)
 	reviewed := runs.ReviewedInputs{Version: 1, Stack: f.stack, StackRevision: spec.StackRevisionID, Subject: spec.Source.SubjectID, Facts: spec.Source.FactsRevision, Commit: spec.Source.Commit, Engine: runs.ManifestEngine{Name: spec.Engine.Name, Version: spec.Engine.Version, Arch: spec.Engine.Arch, Image: spec.Engine.ImageDigest, Git: "1:2.47.3-0+deb13u1"}, Backend: runs.ManifestBackend{Partition: b.Target.Partition, Bucket: b.Target.Bucket, Key: b.Target.Key, Region: b.Region, Owner: b.ExpectedOwner, Workspace: spec.Workspace, Profile: b.Profile, Table: b.TableARN, AttributesDigest: runs.Digest(b.Attributes)}, AWS: runs.ManifestAWS{ID: spec.AWS.ID, Revision: spec.AWS.Revision, Role: spec.AWS.RoleARN}, Pool: spec.Pool, Files: []runs.ManifestFile{{Repository: spec.Source.RepositoryID, Commit: spec.Source.Commit, Path: "main.tf", Kind: "regular", Size: int64(len(nativeSource)), Hash: hex.EncodeToString(nativeSourceHash[:])}}, Modules: []runs.ManifestModule{}, VarFiles: []runs.ManifestInputFile{}, BackendFiles: []runs.ManifestInputFile{}, Secrets: spec.Secrets, Grants: spec.Grants, Approval: runs.ApprovalPolicy{Floor: floor, Requested: p.Review.Minimum, Minimum: p.Review.Minimum, Revision: spec.Review.Revision}, AllowPR: spec.Review.AllowPRApply, Credentials: spec.SourceCredentials, Rules: spec.RuleVersion, Profile: spec.ProfileID, Epoch: 0, Provenance: runs.Provenance{Kind: "normal"}}
 	pre := runs.PreInitSpec{ReviewedInputs: reviewed, Kind: "plan", SpecDigest: a.Digest, LockOrigin: "absent"}
+	f.ticks.followElapsed()
 	return &executionFixture{preflightFixture: f, assignment: a, pre: pre, seq: 1, secret: secretValue}
 }
 func (f *executionFixture) message(payload any) runs.Message {
@@ -691,4 +692,20 @@ func TestExecutionPlatformRestartOnlyAcceptsStoppedFinalization(t *testing.T) {
 	if e != nil || reason != "ATTEMPT_BUDGET_INSTANCE_ENDED" || reservations != 0 {
 		t.Fatal("restart failure did not preserve its reason or account for ownership", reason, reservations, e)
 	}
+}
+
+// Normal protocol journeys must advance the injected elapsed clock alongside
+// PostgreSQL wall time; a frozen fixture otherwise trips the real drift guard.
+func TestExecutionFixtureClockAdvancesAcrossDelayedRequests(t *testing.T) {
+	f := newExecutionFixture(t)
+	f.prepare(t)
+	// Establish the observation without authorizing a command, as in the
+	// intentional backwards-clock regression above.
+	f.transition(t, "start-permission", runs.CommandRequest{Ordinal: 1, Command: "init", PreInitDigest: runs.Digest(f.pre), Digest: strings.Repeat("b", 64)}, 409)
+	time.Sleep(1200 * time.Millisecond)
+	out := f.transition(t, "start-permission", f.request(t, 1, "init", ""), 200)
+	if out.Permission == nil {
+		t.Fatal("delayed request did not receive its exact command permission")
+	}
+	f.retained(t)
 }

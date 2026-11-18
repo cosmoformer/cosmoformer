@@ -1,6 +1,6 @@
 import {test, mock} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync, writeFileSync, readFileSync, chmodSync, rmSync} from 'node:fs';
+import {existsSync, mkdtempSync, writeFileSync, readFileSync, chmodSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {createServer} from 'node:net';
@@ -36,6 +36,13 @@ test('supervision reports command failures and terminates a real child', async (
     await running.stop();
     assert.notEqual((await running.done).code, 0);
     assert.throws(() => process.kill(running.proc.pid, 0), {code: 'ESRCH'});
+});
+
+test('captured command stdout is drained, separate from diagnostics and byte bounded', async () => {
+    const result=await child(process.execPath,['-e',`process.stderr.write('diagnostic');process.stdout.write('x'.repeat(100000));process.stdout.write(Buffer.from([0xe2]));setTimeout(()=>process.stdout.write(Buffer.from([0x82,0xac])),10);`],{quiet:true,captureStdout:true}).done;
+    assert.equal(result.code,0);assert.equal(result.stdout,'x'.repeat(100000)+'€');assert.equal(result.stdoutTruncated,false);
+    const large=await child(process.execPath,['-e',`process.stdout.write('x'.repeat(17*1024*1024));`],{quiet:true,captureStdout:true}).done;
+    assert.equal(large.code,0);assert.equal(large.stdout.length,16*1024*1024);assert.equal(large.stdoutTruncated,true);
 });
 
 test('shutdown kills a descendant that outlives its group leader', async t => {
@@ -96,4 +103,60 @@ test('command output is captured privately or forwarded with its session label',
     } finally { writer.mock.restore(); }
     assert.equal(result.code, 0);
     assert.equal(forwarded, '[fixture] fixture output');
+});
+
+// Exercise the actual repository module as well as the disposable package
+// fixtures, so the normal workflow coverage measures its failure paths.
+for(const mode of ['missing','denied','signals-denied'])test(`repository supervisor reports ${mode} inspection and returns within its deadline`,{timeout:10000},async t=>{
+    const {spawn,spawnSync}=await import('node:child_process');
+    const dir=mkdtempSync(path.join(tmpdir(),'cf-supervisor-inspection-'));
+    t.after(()=>rmSync(dir,{recursive:true,force:true}));
+    const inspector=path.join(dir,'unavailable-ps');
+    if(mode==='denied')writeFileSync(inspector,'',{mode:0});
+    const ready=path.join(dir,'ready'),report=path.join(dir,'report.json');
+    const driver=path.join(dir,'driver.mjs');
+    writeFileSync(driver,`
+import assert from 'node:assert/strict';
+import cp from 'node:child_process';
+import {syncBuiltinESMExports} from 'node:module';
+import {existsSync,writeFileSync} from 'node:fs';
+const original=cp.spawnSync;
+cp.spawnSync=(command,args,options)=>command==='/bin/ps'?original(${JSON.stringify(inspector)},args,options):original(command,args,options);
+syncBuiltinESMExports();
+if(${mode==='signals-denied'}) {
+ const kill=process.kill;
+ process.kill=(pid,signal)=>{if(pid<0)throw Object.assign(Error('EPERM: synthetic group signal denial'),{code:'EPERM'});return kill(pid,signal);};
+}
+const {child}=await import(${JSON.stringify(new URL('./workflow-lib.mjs',import.meta.url).href)});
+const running=child(process.execPath,['--input-type=module','-e',${JSON.stringify(`import {writeFileSync} from 'node:fs';process.on('SIGTERM',()=>{});writeFileSync(${JSON.stringify(ready)},String(process.pid));setInterval(()=>{},1000);`)}],{quiet:true,captureStdout:true});
+const readyDeadline=performance.now()+3000;
+while(!existsSync(${JSON.stringify(ready)})&&performance.now()<readyDeadline)await new Promise(resolve=>setTimeout(resolve,20));
+assert(existsSync(${JSON.stringify(ready)}));
+const started=performance.now();let error;
+try {await running.stop({graceMs:100});}catch(e){error=e;}
+assert(error instanceof AggregateError);
+const messages=[];const visit=e=>{messages.push(e.message??String(e));if(e.errors)for(const x of e.errors)visit(x);if(e.cause)visit(e.cause);};visit(error);
+assert(messages.some(e=>/Cannot inspect/.test(e)));
+assert(messages.some(e=>/${mode==='denied'?'EACCES':'ENOENT'}/.test(e)));
+if(${mode==='signals-denied'})assert(messages.some(e=>/EPERM/.test(e)));
+writeFileSync(${JSON.stringify(report)},JSON.stringify({group:running.proc.pid,messages,elapsed:performance.now()-started}));
+`);
+    const sentinel=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});
+    t.after(()=>sentinel.kill('SIGKILL'));
+    const parent=spawn(process.execPath,[driver],{stdio:['ignore','pipe','pipe']});
+    let stderr='';parent.stderr.on('data',bytes=>stderr+=bytes);
+    const exit=new Promise((resolve,reject)=>{parent.once('error',reject);parent.once('exit',code=>resolve(code));});
+    let ownedGroup;
+    t.after(()=>{if(parent.exitCode===null)parent.kill('SIGKILL');if(ownedGroup)try{process.kill(-ownedGroup,'SIGKILL');}catch(e){if(e.code!=='ESRCH')throw e;}});
+    const readyDeadline=Date.now()+3500;
+    while(!existsSync(ready)&&parent.exitCode===null&&Date.now()<readyDeadline)await new Promise(resolve=>setTimeout(resolve,20));
+    assert(existsSync(ready),stderr);ownedGroup=Number(readFileSync(ready,'utf8'));
+    const code=await Promise.race([exit,new Promise((_,reject)=>{const timer=setTimeout(()=>reject(Error('Supervision failure did not settle')),7000);timer.unref();})]);
+    assert.equal(code,0,stderr);
+    const result=JSON.parse(readFileSync(report,'utf8'));assert(result.elapsed<4500);
+    assert(result.messages.some(e=>e.includes(String(result.group))));
+    if(mode==='signals-denied') {assert.doesNotThrow(()=>process.kill(result.group,0));process.kill(-result.group,'SIGKILL');await new Promise(resolve=>setTimeout(resolve,100));}
+    const state=spawnSync('/bin/ps',['-p',String(result.group),'-o','state='],{encoding:'utf8'});
+    assert(state.status===1&&!state.stdout.trim()||state.status===0&&/^\s*Z/.test(state.stdout));
+    assert.doesNotThrow(()=>process.kill(sentinel.pid,0));
 });
