@@ -6,7 +6,7 @@ import {assessOverallCoverage} from './overall-coverage.mjs';
 
 export const serverImage = 'sonarqube:26.11.0.134175-community@sha256:1ce197471f5f2bac347694a336862fd2c23e9f57c6edb46acebbfbe70f2c7d9c';
 export const scannerImage = 'sonarsource/sonar-scanner-cli:11@sha256:46341f2c2dc560381414e90347885f5cddc716db080adcbafc1cac13e1473094';
-export const reports = ['go.out', 'web/lcov.info', 'contract/lcov.info', 'workflows/lcov.info', 'runtime/lcov.info'];
+export const reports = ['go.out', 'web/lcov.info', 'contract/lcov.info', 'workflows/lcov.info', 'runtime/lcov.info', 'packaging/lcov.info'];
 const root = path.resolve(import.meta.dirname, '..');
 const coverage = base => path.join(base, '.build/coverage');
 const execute = (command, args) => execFileSync(command, args, {encoding: 'utf8', stdio: 'pipe', maxBuffer: 16 * 1024 * 1024});

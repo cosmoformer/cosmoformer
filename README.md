@@ -18,7 +18,7 @@ Schema version **15** adds host-only maintenance, atomic offline key rotation, e
 
 Schema version **16** adds safe artifact retention and cleanup while preserving migrations 001–015. Cleanup defaults to disabled; enabled daily scheduling and explicit administrator actions select at most 100 exact-version claims per bounded batch. Usable plans, live or uncertain attempts, recovery and declared backups remain protected. Failed claims retry their original version; completed deletion keeps a tombstone and historical evidence stays truthfully unavailable. Test backup protection and restoration before enabling cleanup. See [retention operations](docs/operator-guide.md#artifact-retention-and-cleanup-milestone-14).
 
-There is no production release. Deployment packaging and company adoption remain milestones 15 and 16. Synthetic PostgreSQL/worker tests and the separate network-isolated native matrices do not establish live AWS/IAM or company compatibility. See the [planning behavior and boundaries](docs/operator-guide.md#native-planning).
+There is no production release. Local deployment packaging implements milestone 15; company adoption remains milestone 16. Synthetic PostgreSQL/worker tests and the separate network-isolated native matrices do not establish live AWS/IAM or company compatibility. See the [planning behavior and boundaries](docs/operator-guide.md#native-planning).
 
 ## Local development
 
@@ -111,6 +111,25 @@ Check source and Request plan are separate explicit actions. Accepted requests o
 
 Logs support follow/pause, bounded archive cursor continuation, preview resets and known/unknown gaps. The browser retains at most 512 Ki characters and 500 displayed segments; that display limit is separate from durable evidence loss. Polling does not renew idle sessions. Scope changes, logout/expiry and denied reads clear protected data, and sign-in never replays a planning mutation. Raw downloads remain explicit and separately authorized through the existing API. The workspace supports keyboard navigation, responsive layouts and light/dark themes.
 
+## Deployment packaging
+
+Milestone 15 adds local reproducible platform/proxy images, separate hardened
+platform and worker Compose references, production Nginx routing and generated
+CSP. Startup requires explicit operator inputs; it never migrates, initializes
+credentials, approves runtimes or resumes work. See the [packaging and lifecycle
+guide](docs/deployment-packaging.md) for builds, identity checks, private access,
+TLS, protected configuration, upgrades and verification boundaries.
+
+```sh
+make package
+make test-package
+make test-package-browser
+```
+
+These commands build and exercise disposable local packages. Nothing is published
+or deployed. Company adoption remains milestone 16; compatibility is
+`not_assessed`.
+
 ## Checks
 
 `make test-integration-local` starts a fresh PostgreSQL container, runs the host integration suite, then removes the container and its protected control files. Each invocation uses its own `.build/test-runs/run-*` directory and random port, independently of the development DB and manually managed test DB. `TEST_ARGS` can select tests, for example `make test-integration-local TEST_ARGS="-run 'TestLocalDevelopmentSeed|TestBootstrap' -count=1"`. Cleanup also runs after test failures or Ctrl-C. Creation identity is saved before Docker starts, so cleanup can find an owned container even if its creation reply is lost. If Docker cannot confirm the outcome, the receipt is retained for recovery; run `COSMOFORMER_TEST_DIR=/absolute/path/to/run-directory node scripts/dev.mjs test-stop` after Docker settles. A forced kill may also require this cleanup; do not remove other runs' resources. The command overrides inherited test DSNs with its own marker-checked database. The seed acceptance test exercises the actual Node client against the Go API and PostgreSQL twice and verifies the resulting grants and logout.
@@ -159,7 +178,7 @@ With the isolated test database running, `make test-coverage` generates Go, fron
 
 CI also runs `make test-overall-coverage` against a fresh, pinned SonarQube service after all coverage suites. Both **overall combined coverage and overall line coverage must be strictly greater than 80%**; exactly 80% fails. The gate uses integer covered/total counts, not rounded percentages or package averages, and does not depend on a new-code baseline or the default Sonar quality gate. Missing, empty or stale reports, changed source/HEAD, incomplete analysis, missing Go/JavaScript/TypeScript analysis, and mismatched analysis IDs fail the job. No application-source coverage exclusions were added.
 
-`make check` and `make test-coverage` begin a collection receipt and generate the five required reports. `make check` also retains the native, browser and other functional checks. The CI service is disposable, loopback-published and uses an ephemeral evaluation database; it is not part of the product deployment. The scanner shares only that service's network namespace and reads a prepared source snapshot. Its project token is held in an owner-only temporary file and removed after the scan. For local verification, use a fresh container of the pinned Sonar image on a dedicated Docker network, publish its port 9000 only on loopback, then run:
+`make check` and `make test-coverage` begin a collection receipt and generate the six required reports. `make check` also retains the native, browser and other functional checks. The CI service is disposable, loopback-published and uses an ephemeral evaluation database; it is not part of the product deployment. The scanner shares only that service's network namespace and reads a prepared source snapshot. Its project token is held in an owner-only temporary file and removed after the scan. For local verification, use a fresh container of the pinned Sonar image on a dedicated Docker network, publish its port 9000 only on loopback, then run:
 
 ```sh
 COSMOFORMER_SONAR_CONTAINER=<fresh-container-id> \
@@ -178,7 +197,7 @@ Coverage includes all application TypeScript/React files, including unvisited fi
 Serving never migrates implicitly. The runtime uses `COSMOFORMER_DATABASE_DSN_FILE`; migration/bootstrap/recovery commands use the separate `COSMOFORMER_MIGRATION_DSN_FILE`. Input files must be regular, owner-readable only. The development setup provisions distinct owner and restricted runtime database roles.
 
 ```sh
-# List the ten embedded forward-only migrations without a database connection:
+# List the seventeen embedded forward-only migrations without a database connection:
 .build/tools/go/bin/go run ./cmd/cosmoformer migrate --list
 
 # Recover an existing enabled installation administrator on this local DB:

@@ -78,6 +78,9 @@ func (h *Hasher) run(ctx context.Context, f func() (string, error)) (string, err
 		return "", ctx.Err()
 	}
 	defer func() { <-h.active }()
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	return f()
 }
 func derive(password string) string {
@@ -95,7 +98,19 @@ func (h *Hasher) Hash(ctx context.Context, password string) (string, error) {
 	return h.run(ctx, func() (string, error) { return derive(password), nil })
 }
 func (h *Hasher) Verify(ctx context.Context, password, phc string) error {
+	return h.VerifyGuarded(ctx, password, phc, nil)
+}
+
+// VerifyGuarded calls admit only after acquiring bounded verification capacity.
+// It lets authentication reserve durable accounting before expensive work,
+// without allocating throttle subjects for busy or already-canceled requests.
+func (h *Hasher) VerifyGuarded(ctx context.Context, password, phc string, admit func() error) error {
 	_, err := h.run(ctx, func() (string, error) {
+		if admit != nil {
+			if err := admit(); err != nil {
+				return "", err
+			}
+		}
 		known := phc != ""
 		if !known {
 			phc = h.dummy

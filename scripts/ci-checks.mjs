@@ -15,7 +15,7 @@ export const producerReports = {
     backend: ['go.backend.out'],
     ...Object.fromEntries(Array.from({length: shardCount}, (_, i) => [`acceptance-${i}`, [`go.acceptance-${i}.out`]])),
     linux: ['linux/source.out', 'linux/worker.out', 'linux/clock.out', 'linux/command.out'],
-    web: ['web/lcov.info'], scripts: ['workflows/lcov.info', 'contract/lcov.info'], runtime: ['runtime/lcov.info'],
+    web: ['web/lcov.info'], scripts: ['workflows/lcov.info', 'contract/lcov.info'], runtime: ['runtime/lcov.info'], packaging: ['packaging/lcov.info'],
 };
 export function requireSuccessfulJobs(jobs) {
     const required = [...new Set(Object.keys(producerReports).map(id => id.replace(/-\d+$/, ''))), 'native'].sort(compareText);
@@ -106,10 +106,14 @@ export function verifyTestEvents(output, selected) {
     if (!equal([...completed].sort(compareText), [...selected].sort(compareText))) throw Error('Acceptance shard did not execute its exact test selection');
     return completed.sort(compareText);
 }
-export function runGoProducer(id, options) {
+function requireGoProducer(id) {
     if (id !== 'backend' && !/^acceptance-[0-3]$/.test(id)) throw Error('Unknown Go producer');
-    const o = settings(options); beginProducer(id, o);
+}
+export function collectGoProfile(id, options) {
+    requireGoProducer(id);
+    const o = settings(options);
     const coverage = path.join(o.base, '.build/coverage'); mkdirSync(coverage, {recursive: true});
+    rmSync(path.join(coverage, producerReports[id][0]), {force: true});
     const raw = mkdtempSync(path.join(coverage, 'go-raw.'));
     const env = {...o.env, COSMOFORMER_TEST_COVER_DIR: raw}, go = o.env.COSMOFORMER_GO || 'go';
     const flags = ['-race', '-count=1', '-timeout=15m', '-tags=integration', '-covermode=atomic', '-coverpkg=./internal/...,./cmd/...'];
@@ -122,12 +126,27 @@ export function runGoProducer(id, options) {
             tests = {inventory, selected};
             args = ['-run=^(' + selected.join('|') + ')$', './tests/acceptance'];
         }
-        const output = invoke(['test', ...flags, '-json', ...args, '-args', '-test.gocoverdir=' + raw]);
+        let output;
+        try {
+            output = invoke(['test', ...flags, '-json', ...args, '-args', '-test.gocoverdir=' + raw]);
+        } catch (error) {
+            // Node's inspected Error truncates long stdout/stderr properties.
+            // Keep the actual failing assertion in local and CI producer logs.
+            if (error.stdout) console.log(error.stdout.toString());
+            if (error.stderr) console.error(error.stderr.toString());
+            throw error;
+        }
         console.log(output);
         if (tests) tests.completed = verifyTestEvents(output, tests.selected);
         invoke(['tool', 'covdata', 'textfmt', '-i=' + raw, '-o=' + path.join(coverage, producerReports[id][0])]);
-        sealProducer(id, o, tests);
+        return tests;
     } finally { rmSync(raw, {recursive: true, force: true}); }
+}
+export function runGoProducer(id, options) {
+    requireGoProducer(id);
+    const o = settings(options); beginProducer(id, o);
+    const tests = collectGoProfile(id, o);
+    sealProducer(id, o, tests);
 }
 function validateSelection(receipts) {
     let inventory;

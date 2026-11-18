@@ -197,11 +197,47 @@ jobs:
           overwrite: true
           include-hidden-files: true
 
+  packaging:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      BUILDX_BUILDER: cosmoformer-packaging
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/test-tools
+        with:
+          go: 'false'
+          web: 'true'
+      - run: cd web && npx --no-install playwright install --with-deps chromium firefox
+      # The runner's classic Docker store cannot export timestamp-normalized
+      # archives through the default docker driver. Use the existing Buildx CLI
+      # with an exact BuildKit image; never publish the resulting packages.
+      - name: Prepare packaging builder
+        run: |
+          docker buildx create --name "$BUILDX_BUILDER" --driver docker-container --driver-opt image=moby/buildkit:v0.29.0@sha256:0039c1d47e8748b5afea56f4e85f14febaf34452bd99d9552d2daa82262b5cc5
+          docker buildx inspect --bootstrap "$BUILDX_BUILDER"
+      - run: node scripts/ci-checks.mjs begin packaging
+      - run: make test-package
+      - run: node scripts/ci-checks.mjs seal packaging
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-packaging
+          path: .build/ci/artifact/
+          if-no-files-found: error
+          retention-days: 3
+          overwrite: true
+          include-hidden-files: true
+      - name: Remove packaging builder
+        if: ${{ always() }}
+        run: docker buildx rm "$BUILDX_BUILDER"
+
   # Preserve the existing required check name. Failed, skipped or cancelled
   # producers cannot silently reduce the test inventory or coverage inputs.
   local-reference:
     if: ${{ always() }}
-    needs: [backend, acceptance, linux, native, runtime, web, scripts]
+    needs: [backend, acceptance, linux, native, runtime, web, scripts, packaging]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     services:

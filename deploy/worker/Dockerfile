@@ -8,7 +8,18 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
-RUN CGO_ENABLED=0 go build -trimpath -o /out/cosmoformer-worker ./cmd/worker
+COPY LICENSE ./
+RUN CGO_ENABLED=0 go build -buildvcs=false -trimpath -o /out/cosmoformer-worker ./cmd/worker \
+ && mkdir -p /out/licenses/go \
+ && cp LICENSE /out/licenses/Cosmoformer-MIT \
+ && go list -m -f '{{if and .Dir .Version}}{{.Path}} {{.Version}} {{.Dir}}{{end}}' all > /out/modules.txt \
+ && while read name version dir; do dest="/out/licenses/go/$name@$version"; mkdir -p "$dest"; find "$dir" -maxdepth 1 -type f \( -iname '*license*' -o -iname '*notice*' -o -iname '*copying*' \) -exec cp -t "$dest" '{}' + || exit 1; done < /out/modules.txt \
+ && go version -m /out/cosmoformer-worker > /out/go-build.txt \
+ && (find cmd internal -type f -print0 | sort -z | xargs -0 sha256sum; sha256sum go.mod go.sum LICENSE) > /out/source.SHA256SUMS \
+ && cd /out && sha256sum cosmoformer-worker > SHA256SUMS
+ARG SOURCE_REVISION=unrecorded
+ARG SOURCE_SHA256=unrecorded
+RUN printf '{"revision":"%s","source_sha256":"%s"}\n' "$SOURCE_REVISION" "$SOURCE_SHA256" > /out/source.json
 
 # Native/coverage/worker targets do not need ordinary source-test binaries.
 FROM build AS source-test-build
@@ -43,7 +54,9 @@ RUN set -eu; \
  test "${ENGINE_URL:-$url}" = "$url"; test "${ENGINE_MEMBER:-$binary}" = "$binary"; \
  curl --fail --location --proto '=https' --proto-redir '=https' --max-time 120 "$url" -o /tmp/runtime.zip; \
  printf '%s  /tmp/runtime.zip\n' "$ARCHIVE_SHA256" | sha256sum -c -; \
+ mkdir -p /usr/local/share/cosmoformer/licenses/engine; \
  unzip -j /tmp/runtime.zip "$binary" -d /usr/local/bin; \
+ (unzip -j /tmp/runtime.zip 'LICENSE*' -d /usr/local/share/cosmoformer/licenses/engine || test -n "$(ls -A /usr/local/share/cosmoformer/licenses/engine)"); \
  chmod 0755 "/usr/local/bin/$binary"; \
  mkdir -p /usr/local/share/cosmoformer /var/lib/cosmoformer/attempts; \
  binary_sha256=$(sha256sum "/usr/local/bin/$binary"); binary_sha256=${binary_sha256%% *}; \
@@ -55,6 +68,8 @@ USER 10001:10001
 
 FROM engine AS runtime
 COPY --from=build /out/cosmoformer-worker /usr/local/bin/cosmoformer-worker
+COPY --from=build /out/licenses /usr/local/share/cosmoformer/licenses
+COPY --from=build /out/source.json /out/source.SHA256SUMS /out/go-build.txt /out/SHA256SUMS /usr/local/share/cosmoformer/
 ENTRYPOINT ["/usr/local/bin/cosmoformer-worker"]
 
 FROM runtime AS source-tests

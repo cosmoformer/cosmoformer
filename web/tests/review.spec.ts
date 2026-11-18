@@ -1,6 +1,7 @@
 import { approvalSummary } from './fixtures/review';
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures/test';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { changes, changesResponse, reviewSession, projects, stackFixture, runFixture, runResponse, org, project, env, stack, run, attempt, plan, reviewID } from './fixtures/review';
 const base = `/o/${org}/p/${project}`;
 async function synthetic(page: Page) {
@@ -31,7 +32,7 @@ async function synthetic(page: Page) {
     return model;
 }
 
-test('real retained evidence: scoped HTTPS project, stack, exact run, refresh and Changes', async ({ page }, info) => {
+test('real retained evidence: scoped HTTPS project, stack, exact run, refresh and Changes', async ({ page, playwright, baseURL }, info) => {
     const c = JSON.parse(readFileSync(new URL('../../.build/testdb/browser.json', import.meta.url), 'utf8'));
     const r = c.review.run;
     await page.goto(`/o/${c.org}/p/${r.project_id}/runs/${r.id}?env=${r.environment_id}&view=changes`);
@@ -46,6 +47,22 @@ test('real retained evidence: scoped HTTPS project, stack, exact run, refresh an
     await expect(page.getByRole('heading', { name: 'Change summary' })).toBeVisible();
     await expect(page.getByText(r.commit, { exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: /Download/ })).toHaveCount(0);
+    const path = `/api/v1/organizations/${c.org}/artifacts/${c.review_artifact.id}/content`;
+    const denied = await page.request.get(path);
+    expect(denied.status()).toBe(403);
+    expect(denied.headers()['cache-control']).toBe('no-store');
+    const reader = await playwright.request.newContext({ baseURL, ignoreHTTPSErrors: true, extraHTTPHeaders: { Origin: baseURL!, 'X-Cosmoformer-Request': 'browser' } });
+    try {
+        const login = await reader.post('/api/v1/session/login', { data: { username: c.evidence_username, password: c.review_password } });
+        expect(login.status()).toBe(200);
+        const content = await reader.get(path);
+        expect(content.status()).toBe(200);
+        expect(content.headers()['cache-control']).toBe('no-store');
+        expect(content.headers()['content-type']).toBe('application/octet-stream');
+        const bytes = await content.body();
+        expect(bytes.length).toBe(c.review_artifact.size);
+        expect(createHash('sha256').update(bytes).digest('hex')).toBe(c.review_artifact.sha256);
+    } finally { await reader.dispose(); }
     await page.screenshot({ path: info.outputPath('real-retained-review.png'), fullPage: true });
 });
 

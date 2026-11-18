@@ -1,0 +1,97 @@
+# Explicit operator lifecycle only: no initialization, migration or restart policy.
+name: ${COMPOSE_PROJECT_NAME:?set a unique installation project name}
+x-hardened: &hardened
+  platform: linux/amd64
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 256
+  cpus: 2
+  mem_limit: 1g
+  stop_grace_period: 45s
+  ulimits:
+    nofile: {soft: 4096, hard: 4096}
+services:
+  postgres:
+    <<: *hardened
+    image: postgres:18.6-alpine@sha256:8a334ab9502c8ccb8d7dec4e83b36b5ce8ed7b396e585f1c86b0e69c416f4fca
+    user: '70:70'
+    entrypoint: [postgres]
+    command: [-D, /var/lib/postgresql/18/docker]
+    volumes:
+      - database:/var/lib/postgresql
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=70,gid=70,mode=0700
+      - /var/run/postgresql:rw,noexec,nosuid,nodev,size=16m,uid=70,gid=70,mode=0700
+    networks: [database]
+  platform:
+    <<: *hardened
+    image: ${PLATFORM_IMAGE:?set verified platform image ID or digest reference}
+    user: '10001:10001'
+    command: [serve]
+    environment:
+      COSMOFORMER_ORIGIN: ${COSMOFORMER_ORIGIN:?set canonical HTTPS origin}
+      COSMOFORMER_LISTEN: ''
+      COSMOFORMER_UNIX_SOCKET: /run/cosmoformer/api.sock
+      COSMOFORMER_DATABASE_DSN_FILE: /run/inputs/runtime.dsn
+      COSMOFORMER_ENCRYPTION_KEY_FILE: /run/inputs/encryption.key
+      COSMOFORMER_ARTIFACT_BUCKET: ${ARTIFACT_BUCKET:?set artifact bucket}
+      COSMOFORMER_ARTIFACT_REGION: ${ARTIFACT_REGION:?set artifact region}
+      COSMOFORMER_ARTIFACT_EXPECTED_OWNER: ${ARTIFACT_EXPECTED_OWNER:?set exact account ID}
+      COSMOFORMER_CLEANUP_ENABLED: 'false'
+    volumes:
+      - socket:/run/cosmoformer
+      - type: bind
+        source: ${RUNTIME_DSN_FILE:?set protected runtime DSN file}
+        target: /run/inputs/runtime.dsn
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${ENCRYPTION_KEY_FILE:?set protected encryption key file}
+        target: /run/inputs/encryption.key
+        read_only: true
+        bind: {create_host_path: false}
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=512m,uid=10001,gid=10001,mode=0700
+    networks: [database, outbound]
+  nginx:
+    <<: *hardened
+    image: ${PROXY_IMAGE:?set verified proxy image ID or digest reference}
+    user: '10001:10001'
+    mem_limit: 256m
+    stop_signal: SIGQUIT
+    ports:
+      - '${HTTPS_BIND_IP:?set private approved listener IP}:${HTTPS_PORT:?set HTTPS port}:8443'
+    volumes:
+      - type: volume
+        source: socket
+        target: /run/cosmoformer
+        read_only: true
+        volume: {nocopy: true}
+      - type: bind
+        source: ${TLS_CERT_FILE:?set certificate file}
+        target: /run/tls/cert.pem
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${TLS_KEY_FILE:?set protected TLS private key file}
+        target: /run/tls/key.pem
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${PRIVATE_ACCESS_FILE:?set approved client allow/deny file}
+        target: /etc/nginx/private-access.conf
+        read_only: true
+        bind: {create_host_path: false}
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,uid=10001,gid=10001,mode=0700
+    networks: [edge]
+volumes:
+  database:
+    external: true
+    name: ${POSTGRES_VOLUME:?set previously prepared persistent PostgreSQL volume}
+  socket: {}
+networks:
+  database: {internal: true}
+  outbound: {}
+  edge: {}

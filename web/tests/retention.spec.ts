@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/test';
 import { readFileSync } from 'node:fs';
 
 test('administrators inspect retention and explicitly run a bounded empty cleanup', async ({ page }) => {

@@ -5,7 +5,7 @@ import path from 'node:path';
 const dir = path.resolve(import.meta.dirname, '../.build/dev');
 export default defineConfig(({ command, isPreview }) => {
     // React Router's build-time preview uses HTTP; only the browser fixture opts into HTTPS preview.
-    const https = command === 'serve' && (!isPreview || process.env.COSMOFORMER_PREVIEW_HTTPS === '1');
+    const https = command === 'serve' && (process.env.COSMOFORMER_PREVIEW_HTTPS === '1' || (!isPreview && process.env.NODE_ENV !== 'production'));
     if (https && !existsSync(path.join(dir, 'cert.pem')))
         throw new Error('Run make dev-setup (or node scripts/dev.mjs cert for tests) before starting the HTTPS frontend.');
     if (https && !isPreview) {

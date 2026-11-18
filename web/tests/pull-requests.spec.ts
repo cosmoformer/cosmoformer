@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures/test';
 import { reviewSession, projects, runFixture, runResponse, changesResponse, approvalSummary, org, project, env, run, reviewID } from './fixtures/review';
 import type { Schema } from '../app/lib/api';
 const path = `/o/${org}/p/${project}?env=${env}&view=pull-requests`;
