@@ -3,6 +3,7 @@ import {execFileSync} from 'node:child_process';
 import {randomUUID, randomBytes} from 'node:crypto';
 import {chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import path from 'node:path';
+import {verifyInventory, readInventory, packageTargets} from './package-inventory.mjs';
 export const root = path.resolve(import.meta.dirname, '..');
 export const helperImage = 'nginx:1.28-alpine@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236';
 export function docker(args, options = {}) { return execFileSync('docker', args, {cwd: root, encoding:'utf8', timeout:60000, maxBuffer:16*1024*1024, ...options}).trim(); }
@@ -11,7 +12,9 @@ export function writeBrowserCredentials(file, bytes) {
     // Never replace credentials belonging to another active or interrupted run.
     writeFileSync(file, bytes, {mode:0o600,flag:'wx'});
 }
-export async function fixture({port=5174}={}) {
+export async function fixture({port=5174, targets=packageTargets.slice(0,3)}={}) {
+    const images=readInventory(path.join(root,'.build/package/images.json'));
+    verifyInventory(images,targets,id=>JSON.parse(docker(['image','inspect',id]))[0]);
     const id = `cf-package-${randomUUID()}`, dir = path.join(root,'.build/test-runs',id);
     mkdirSync(dir,{recursive:true,mode:0o700});
     const env = {...process.env, COSMOFORMER_TEST_DIR:dir};
@@ -19,14 +22,14 @@ export async function fixture({port=5174}={}) {
     const containers=[], volumes=[], networks=[];
     const receipt=()=>writeFileSync(path.join(dir,'package-resources.json'),JSON.stringify({containers,volumes,networks}),{mode:0o600});
     const f = {id,dir,env,containers,volumes,networks,origin:`https://localhost:${port}`};
-    f.images=JSON.parse(readFileSync(path.join(root,'.build/package/images.json'),'utf8'));
+    f.images=images;
     const resolved=new Map();
     f.image=target=>{
         if(resolved.has(target))return resolved.get(target);
         const expected=f.images.images[target]?.image_id;
         if(!/^sha256:[0-9a-f]{64}$/.test(expected??''))throw Error(`Build required package target: ${target}`);
         const actual=JSON.parse(docker(['image','inspect',expected]))[0];
-        if(actual.Config.Labels['io.cosmoformer.source.sha256']!==f.images.source_sha256 || actual.Architecture!=='amd64')throw Error('Package image/source identity mismatch');
+        if(actual.Config.Labels['io.cosmoformer.source.sha256']!==f.images.source_sha256 || actual.Config.Labels['org.opencontainers.image.revision']!==f.images.revision || actual.Architecture!=='amd64')throw Error('Package image/source identity mismatch');
         resolved.set(target,expected);return expected;
     };
 

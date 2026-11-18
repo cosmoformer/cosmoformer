@@ -51,6 +51,17 @@ func (c *testClock) Now() (time.Duration, error) {
 	return c.tick, nil
 }
 
+// Explicit clock-failure fixtures keep manual ticks. Normal execution journeys
+// opt in once, before authority observations, so SQL wall time and elapsed time
+// continue to advance together even when a request takes more than one second.
+func (c *testClock) followElapsed() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.start.IsZero() {
+		c.start = time.Now()
+	}
+}
+
 type sourceTransport struct {
 	manifest                []byte
 	commit                  string
